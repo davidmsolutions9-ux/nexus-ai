@@ -13,6 +13,7 @@ import { providersRoutes } from './modules/providers/providers.routes'
 import { billingRoutes } from './modules/billing/billing.routes'
 import { conversationRoutes } from './modules/conversations/conversations.routes'
 import { memoryRoutes } from './modules/memory/memory.routes'
+import { voiceRoutes } from './modules/voice/voice.routes'
 import { refreshPricingCache } from './modules/providers/providers.service'
 import { fail } from './shared/types'
 import { AppError } from './shared/utils/errors'
@@ -108,6 +109,7 @@ export async function buildApp() {
   await app.register(billingRoutes, { prefix: `${prefix}/billing` })
   await app.register(conversationRoutes, { prefix: `${prefix}/conversations` })
   await app.register(memoryRoutes, { prefix: `${prefix}/memory` })
+  await app.register(voiceRoutes, { prefix: `${prefix}/voice` })
 
   return app
 }

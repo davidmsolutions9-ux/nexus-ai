@@ -21,35 +21,119 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
   return (total / 1000) * ACU_RATE[mode] * ACU_TO_CR
 }
 
-// ─── Robot speech synthesis ───────────────────────────────────────────────────
-let activeSpeech: SpeechSynthesisUtterance | null = null
+// ─── Nexus voice: OpenAI TTS + Web Audio echo/reverb ─────────────────────────
 
-function pickRobotVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-  // Prefer synthetic/robotic-sounding voices
-  const robotKeywords = ['google uk english male', 'microsoft david', 'microsoft mark', 'google us english', 'fred', 'trinoids', 'zarvox', 'bahh', 'cellos']
-  for (const kw of robotKeywords) {
-    const v = voices.find((v) => v.name.toLowerCase().includes(kw))
-    if (v) return v
+let audioCtx: AudioContext | null = null
+let activeSource: AudioBufferSourceNode | null = null
+let activeSpeechText: string | null = null
+
+function getAudioContext(): AudioContext {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new AudioContext()
   }
-  // Fallback: any male/english voice
-  return voices.find((v) => v.lang.startsWith('es') || v.lang.startsWith('en')) ?? voices[0] ?? null
+  return audioCtx
 }
 
-function speak(text: string) {
-  if (typeof window === 'undefined') return
+function buildEchoGraph(ctx: AudioContext, buffer: AudioBuffer): AudioBufferSourceNode {
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+
+  // Dry/wet mixer
+  const dryGain = ctx.createGain()
+  const wetGain = ctx.createGain()
+  dryGain.gain.value = 0.85
+  wetGain.gain.value = 0.38
+
+  // Delay node — 210ms echo
+  const delay = ctx.createDelay(1.0)
+  delay.delayTime.value = 0.21
+
+  // Feedback loop for reverb tail
+  const feedback = ctx.createGain()
+  feedback.gain.value = 0.28
+
+  // High-freq roll-off on the echo (makes it sound further away)
+  const filter = ctx.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.value = 3200
+
+  // Compressor to keep levels consistent
+  const compressor = ctx.createDynamicsCompressor()
+  compressor.threshold.value = -18
+  compressor.ratio.value = 4
+
+  // Graph: source → dry → compressor → out
+  //        source → filter → delay → feedback → delay (loop)
+  //        delay → wet → compressor → out
+  source.connect(dryGain)
+  source.connect(filter)
+  filter.connect(delay)
+  delay.connect(feedback)
+  feedback.connect(delay)       // feedback loop
+  delay.connect(wetGain)
+  dryGain.connect(compressor)
+  wetGain.connect(compressor)
+  compressor.connect(ctx.destination)
+
+  return source
+}
+
+async function speakWithTTS(text: string, token: string | null): Promise<void> {
+  if (!token) return
+
+  const res = await fetch('/api/proxy/voice/synthesize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ text }),
+  })
+
+  if (!res.ok) throw new Error('TTS request failed')
+
+  const arrayBuffer = await res.arrayBuffer()
+  const ctx = getAudioContext()
+
+  // Resume context if suspended (iOS requires user interaction first)
+  if (ctx.state === 'suspended') await ctx.resume()
+
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+  const source = buildEchoGraph(ctx, audioBuffer)
+
+  activeSource = source
+  source.start(0)
+}
+
+// Fallback: Web Speech API with feminine robotic voice
+function pickFeminineVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  const preferred = ['Samantha', 'Karen', 'Moira', 'Fiona', 'Victoria', 'Tessa',
+    'Google UK English Female', 'Microsoft Zira', 'Microsoft Helena']
+  for (const name of preferred) {
+    const v = voices.find((v) => v.name === name)
+    if (v) return v
+  }
+  return voices.find((v) => v.name.toLowerCase().includes('female')) ??
+         voices.find((v) => v.lang.startsWith('es') || v.lang.startsWith('en')) ??
+         voices[0] ?? null
+}
+
+function speakFallback(text: string) {
   window.speechSynthesis.cancel()
-  if (activeSpeech?.text === text) { activeSpeech = null; return }
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'es-ES'
-  u.pitch = 0.4      // very low = robotic
-  u.rate  = 0.82     // slightly slow = deliberate
-  u.volume = 1
-  // Pick best robotic voice available
+  const doSpeak = () => {
+    const voices = window.speechSynthesis.getVoices()
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = 'es-ES'
+    u.pitch = 1.15   // feminine, not diabolic
+    u.rate  = 0.88
+    u.volume = 1
+    const voice = pickFeminineVoice(voices)
+    if (voice) u.voice = voice
+    window.speechSynthesis.speak(u)
+  }
   const voices = window.speechSynthesis.getVoices()
-  const robot = pickRobotVoice(voices)
-  if (robot) u.voice = robot
-  activeSpeech = u
-  window.speechSynthesis.speak(u)
+  if (voices.length > 0) { doSpeak() }
+  else { window.speechSynthesis.onvoiceschanged = doSpeak }
 }
 
 interface ChatMessage {
@@ -352,9 +436,37 @@ export default function ChatPage() {
   }
 
   function speakMsg(content: string, idx: number) {
-    speak(content)
-    setSpeakingIdx((prev) => (prev === idx ? null : idx))
-    window.speechSynthesis.addEventListener('end', () => setSpeakingIdx(null), { once: true })
+    // Stop if already speaking this message
+    if (speakingIdx === idx) {
+      activeSource?.stop()
+      activeSource = null
+      activeSpeechText = null
+      window.speechSynthesis.cancel()
+      setSpeakingIdx(null)
+      return
+    }
+
+    // Stop any current speech
+    activeSource?.stop()
+    activeSource = null
+    window.speechSynthesis.cancel()
+
+    setSpeakingIdx(idx)
+    activeSpeechText = content
+
+    speakWithTTS(content, token)
+      .then(() => {
+        if (activeSource) {
+          activeSource.onended = () => { setSpeakingIdx(null); activeSpeechText = null }
+        } else {
+          setSpeakingIdx(null)
+        }
+      })
+      .catch(() => {
+        // Fallback to Web Speech API if TTS fails
+        speakFallback(content)
+        setSpeakingIdx(null)
+      })
   }
 
   // ── Sidebar ─────────────────────────────────────────────────────────────────

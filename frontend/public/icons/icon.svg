@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#111827"/>
+  <!-- X logo polygons -->
+  <polygon points="20,5 256,230 256,282 5,20" fill="url(#cbL)"/>
+  <polygon points="492,507 256,282 256,230 507,492" fill="url(#cbL)"/>
+  <polygon points="492,5 282,256 230,256 507,20" fill="url(#cbR)"/>
+  <polygon points="20,507 230,256 282,256 5,492" fill="url(#cbR)"/>
+  <polygon points="256,169 343,256 256,343 169,256" fill="url(#cgem)"/>
+  <polygon points="256,199 313,256 256,313 199,256" fill="#60b8ff" opacity="0.55"/>
+  <polygon points="256,220 292,256 256,292 220,256" fill="white" opacity="0.30"/>
+  <defs>
+    <linearGradient id="cbL" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#808898"/>
+      <stop offset="35%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#c0c4d8"/>
+      <stop offset="100%" stop-color="#606070"/>
+    </linearGradient>
+    <linearGradient id="cbR" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#808898"/>
+      <stop offset="35%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#c0c4d8"/>
+      <stop offset="100%" stop-color="#606070"/>
+    </linearGradient>
+    <linearGradient id="cgem" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#90d0ff"/>
+      <stop offset="40%" stop-color="#1a70ff"/>
+      <stop offset="100%" stop-color="#0030b0"/>
+    </linearGradient>
+  </defs>
+</svg>

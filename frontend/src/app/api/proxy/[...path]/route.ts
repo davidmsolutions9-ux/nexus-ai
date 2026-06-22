@@ -6,14 +6,30 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
   const { path } = await params
   const target = `${BACKEND}/${path.join('/')}${req.nextUrl.search}`
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const isVoice = path.includes('voice')
+
+  const headers: Record<string, string> = {}
   const auth = req.headers.get('authorization')
   if (auth) headers['authorization'] = auth
+  if (!isVoice) headers['Content-Type'] = 'application/json'
 
-  const body = ['GET', 'HEAD'].includes(req.method) ? undefined : await req.text()
+  const body = ['GET', 'HEAD'].includes(req.method) ? undefined : await req.arrayBuffer()
 
   try {
-    const res = await fetch(target, { method: req.method, headers, body })
+    const res = await fetch(target, {
+      method: req.method,
+      headers,
+      body: body && body.byteLength > 0 ? body : undefined,
+    })
+
+    if (isVoice && res.ok) {
+      const audio = await res.arrayBuffer()
+      return new NextResponse(audio, {
+        status: res.status,
+        headers: { 'Content-Type': 'audio/mpeg' },
+      })
+    }
+
     const text = await res.text()
     return new NextResponse(text, {
       status: res.status,
