@@ -30,6 +30,7 @@
     "@supabase/supabase-js": "^2.108.2",
     "bcrypt": "^5.1.1",
     "dayjs": "^1.11.11",
+    "elevenlabs": "^1.59.0",
     "fastify": "^4.27.0",
     "groq-sdk": "^1.2.1",
     "openai": "^6.44.0",
