@@ -20,6 +20,37 @@ function stripMarkdown(text: string): string {
     .slice(0, 4000)
 }
 
+async function elevenLabsTTS(text: string, apiKey: string): Promise<Buffer> {
+  const voiceId = process.env.ELEVENLABS_VOICE_ID ?? 'cgSgspJ2msm6clMCkdW9' // Jessica
+
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      'Content-Type': 'application/json',
+      'Accept': 'audio/mpeg',
+    },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_multilingual_v2',
+      output_format: 'mp3_44100_128',
+      voice_settings: {
+        stability: 0.45,
+        similarity_boost: 0.80,
+        style: 0.35,
+        use_speaker_boost: true,
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ElevenLabs error ${res.status}: ${err}`)
+  }
+
+  return Buffer.from(await res.arrayBuffer())
+}
+
 export async function voiceRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.authenticate)
 
@@ -33,30 +64,7 @@ export async function voiceRoutes(app: FastifyInstance) {
     const elevenKey = process.env.ELEVENLABS_API_KEY
     if (elevenKey) {
       try {
-        const { ElevenLabsClient } = await import('elevenlabs')
-        const client = new ElevenLabsClient({ apiKey: elevenKey })
-
-        const voiceId = process.env.ELEVENLABS_VOICE_ID ?? 'cgSgspJ2msm6clMCkdW9' // "Jessica" — warm feminine, multilingual
-
-        const audioStream = await client.textToSpeech.convert(voiceId, {
-          text: clean,
-          modelId: 'eleven_multilingual_v2',
-          outputFormat: 'mp3_44100_128',
-          voiceSettings: {
-            stability: 0.45,
-            similarityBoost: 0.80,
-            style: 0.35,
-            useSpeakerBoost: true,
-          },
-        })
-
-        // Collect stream into buffer
-        const chunks: Buffer[] = []
-        for await (const chunk of audioStream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-        }
-        const buffer = Buffer.concat(chunks)
-
+        const buffer = await elevenLabsTTS(clean, elevenKey)
         return reply
           .header('Content-Type', 'audio/mpeg')
           .header('Cache-Control', 'no-store')
