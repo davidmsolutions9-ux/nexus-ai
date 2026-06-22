@@ -100,6 +100,11 @@ export interface ModelCandidate {
   priceSignal: PriceSignal
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface OrchestrationRequest {
   userId: string
   prompt: string
@@ -108,6 +113,9 @@ export interface OrchestrationRequest {
   contextIds?: string[]
   stream?: boolean
   forceProvider?: string
+  messages?: ChatMessage[]   // full conversation history (includes current message)
+  systemPrompt?: string      // mode-specific system prompt
+  noMemory?: boolean         // if true, skip memory fetch and extraction
 }
 
 export interface OrchestrationResult {

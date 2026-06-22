@@ -4,13 +4,21 @@ import { orchestrate } from './orchestrator.service'
 import { ok, fail } from '@shared/types'
 import { AppError } from '@shared/utils/errors'
 
+const ChatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+})
+
 const CompletionSchema = z.object({
   prompt: z.string().min(1).max(32000),
   maxTokens: z.number().int().min(1).max(8192).default(1000),
   sliderMode: z.enum(['ECONOMIC', 'AUTO', 'PRO']).default('AUTO'),
   contextIds: z.array(z.string().uuid()).default([]),
   stream: z.boolean().default(false),
-  forceProvider: z.enum(['groq', 'openai', 'anthropic', 'google']).optional(),
+  forceProvider: z.enum(['groq', 'openai', 'anthropic', 'google', 'gemma', 'mixtral']).optional(),
+  messages: z.array(ChatMessageSchema).optional(),
+  systemPrompt: z.string().max(4000).optional(),
+  noMemory: z.boolean().default(false),
 })
 
 export async function orchestratorRoutes(app: FastifyInstance) {

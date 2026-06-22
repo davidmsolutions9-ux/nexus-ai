@@ -59,6 +59,25 @@ enum ContextType {
   SUMMARY
 }
 
+enum MemoryCategory {
+  IDENTITY
+  HEALTH
+  RELATIONSHIPS
+  FINANCES
+  WORK
+  PREFERENCES
+  EVENTS
+  GOALS
+  EMOTIONAL
+}
+
+enum FactStatus {
+  ACTIVE
+  OBSOLETE
+  RESOLVED
+  UNCERTAIN
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -76,9 +95,13 @@ model User {
   stripeCustomerId  String?          @unique
   createdAt         DateTime         @default(now())
 
-  plan         Plan                @relation(fields: [planId], references: [id])
-  transactions CreditTransaction[]
-  contexts     UserContext[]
+  plan          Plan                @relation(fields: [planId], references: [id])
+  transactions  CreditTransaction[]
+  contexts      UserContext[]
+  conversations Conversation[]
+  memoryFacts   MemoryFact[]
+  relationships UserRelationship[]
+  notifications ProactiveNotification[]
 
   @@index([email])
   @@index([planId])
@@ -161,6 +184,100 @@ model Settlement {
   @@index([status])
   @@index([settlementPeriod])
   @@map("settlements")
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ConversationMessage[]
+
+  @@index([userId])
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             String            @id @default(uuid())
+  conversationId String
+  role           String
+  content        String
+  sliderMode     SliderPreference?
+  provider       String?
+  model          String?
+  creditCost     Decimal?          @db.Decimal(10, 6)
+  createdAt      DateTime          @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+  @@map("conversation_messages")
+}
+
+model MemoryFact {
+  id           String         @id @default(uuid())
+  userId       String
+  category     MemoryCategory
+  key          String
+  value        String
+  factDate     DateTime?      // fecha a la que se refiere el hecho (ej: cita médica)
+  isFuture     Boolean        @default(false)
+  status       FactStatus     @default(ACTIVE)
+  confidence   Decimal        @default(0.85) @db.Decimal(3, 2)
+  sourceConvId String?
+  validFrom    DateTime       @default(now())
+  validUntil   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, key, status])
+  @@index([userId, status])
+  @@index([userId, category])
+  @@index([userId, isFuture, factDate])
+  @@map("memory_facts")
+}
+
+model UserRelationship {
+  id               String    @id @default(uuid())
+  userId           String
+  name             String
+  relationshipType String
+  birthday         DateTime?
+  lastMentioned    DateTime?
+  notes            String?
+  status           String    @default("active")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([userId, birthday])
+  @@map("user_relationships")
+}
+
+model ProactiveNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  message   String
+  type      String   // "birthday", "event", "goal", "checkin", "anniversary"
+  seen      Boolean  @default(false)
+  scheduledFor DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, seen])
+  @@index([userId, scheduledFor])
+  @@map("proactive_notifications")
 }
 
 model UserContext {

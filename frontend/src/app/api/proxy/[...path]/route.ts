@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const BACKEND = 'http://localhost:3000/api/v1'
+const BACKEND = process.env.BACKEND_URL ?? 'https://postgres-production-bd842.up.railway.app/api/v1'
 
 async function proxy(req: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params

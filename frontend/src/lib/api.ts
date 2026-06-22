@@ -33,11 +33,47 @@ export const api = {
     transactions: (page = 1) => request<Transaction[]>(`/credits/transactions?page=${page}`),
   },
   chat: {
-    complete: (body: { prompt: string; sliderMode: string; maxTokens?: number; forceProvider?: string }) =>
+    complete: (body: {
+      prompt: string
+      sliderMode: string
+      maxTokens?: number
+      forceProvider?: string
+      messages?: { role: 'user' | 'assistant'; content: string }[]
+      systemPrompt?: string
+      noMemory?: boolean
+    }) =>
       request<{ provider: string; model: string; tokensConsumed: number; acuCost: number; creditCost: number; responseText: string }>('/orchestrator/complete', { method: 'POST', body: JSON.stringify(body) }),
   },
   providers: {
     list: () => request<ProviderModel[]>('/providers'),
+  },
+  memory: {
+    notifications: () => request<{ messages: string[] }>('/memory/notifications'),
+    profile: () => request<{ facts: unknown[]; relationships: unknown[] }>('/memory/profile'),
+    deleteFact: (id: string) => request<{ deleted: boolean }>(`/memory/facts/${id}`, { method: 'DELETE' }),
+    deleteRelationship: (id: string) => request<{ deleted: boolean }>(`/memory/relationships/${id}`, { method: 'DELETE' }),
+  },
+  conversations: {
+    list: () => request<ConversationSummary[]>('/conversations'),
+    create: (title: string) =>
+      request<{ id: string; title: string; createdAt: string }>('/conversations', {
+        method: 'POST',
+        body: JSON.stringify({ title }),
+      }),
+    messages: (id: string) => request<ConversationMessageRecord[]>(`/conversations/${id}/messages`),
+    addMessage: (id: string, body: {
+      role: 'user' | 'assistant'
+      content: string
+      sliderMode?: string
+      provider?: string
+      model?: string
+      creditCost?: number
+    }) => request<ConversationMessageRecord>(`/conversations/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+    delete: (id: string) => request<{ deleted: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
+    summarize: (id: string) => request<{ summarized?: boolean; skipped?: boolean }>(`/conversations/${id}/summarize`, { method: 'POST' }),
   },
 }
 
@@ -57,4 +93,24 @@ export interface ProviderModel {
   qualityIndex: number
   latencyP95Ms: number
   status: string
+}
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  messages: { role: string; content: string }[]
+}
+
+export interface ConversationMessageRecord {
+  id: string
+  conversationId: string
+  role: string
+  content: string
+  sliderMode?: string
+  provider?: string
+  model?: string
+  creditCost?: string
+  createdAt: string
 }

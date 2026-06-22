@@ -11,6 +11,8 @@ import { creditsRoutes } from './modules/credits/credits.routes'
 import { orchestratorRoutes } from './modules/orchestrator/orchestrator.routes'
 import { providersRoutes } from './modules/providers/providers.routes'
 import { billingRoutes } from './modules/billing/billing.routes'
+import { conversationRoutes } from './modules/conversations/conversations.routes'
+import { memoryRoutes } from './modules/memory/memory.routes'
 import { refreshPricingCache } from './modules/providers/providers.service'
 import { fail } from './shared/types'
 import { AppError } from './shared/utils/errors'
@@ -104,6 +106,8 @@ export async function buildApp() {
   await app.register(orchestratorRoutes, { prefix: `${prefix}/orchestrator` })
   await app.register(providersRoutes, { prefix: `${prefix}/providers` })
   await app.register(billingRoutes, { prefix: `${prefix}/billing` })
+  await app.register(conversationRoutes, { prefix: `${prefix}/conversations` })
+  await app.register(memoryRoutes, { prefix: `${prefix}/memory` })
 
   return app
 }
