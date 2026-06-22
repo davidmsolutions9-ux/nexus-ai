@@ -20,11 +20,24 @@ export async function voiceRoutes(app: FastifyInstance) {
 
     const client = new OpenAI({ apiKey: key })
 
+    // Strip markdown so the voice doesn't read "asterisk asterisk" etc.
+    const clean = body.data.text
+      .replace(/```[\s\S]*?```/g, '')          // code blocks
+      .replace(/`[^`]+`/g, '')                 // inline code
+      .replace(/#{1,6}\s/g, '')                // headings
+      .replace(/\*\*([^*]+)\*\*/g, '$1')       // bold
+      .replace(/\*([^*]+)\*/g, '$1')           // italic
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+      .replace(/^\s*[-*]\s/gm, '')             // list bullets
+      .replace(/\n{3,}/g, '\n\n')              // excess newlines
+      .trim()
+      .slice(0, 4000)
+
     const response = await client.audio.speech.create({
-      model: 'tts-1',
-      voice: 'nova',        // feminine, clear, neutral
-      input: body.data.text,
-      speed: 0.9,           // slightly slower = more deliberate
+      model: 'tts-1-hd',    // high quality
+      voice: 'shimmer',     // soft, natural feminine — best for Spanish
+      input: clean,
+      speed: 1.0,
     })
 
     const buffer = Buffer.from(await response.arrayBuffer())

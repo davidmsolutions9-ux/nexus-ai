@@ -78,6 +78,20 @@ function buildEchoGraph(ctx: AudioContext, buffer: AudioBuffer): AudioBufferSour
   return source
 }
 
+function cleanForTTS(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]+`/g, '')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^\s*[-*]\s/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 4000)
+}
+
 async function speakWithTTS(text: string, token: string | null): Promise<void> {
   if (!token) return
 
@@ -87,7 +101,7 @@ async function speakWithTTS(text: string, token: string | null): Promise<void> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: cleanForTTS(text) }),
   })
 
   if (!res.ok) throw new Error('TTS request failed')
