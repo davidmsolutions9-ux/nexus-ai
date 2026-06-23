@@ -58,56 +58,87 @@ function stopCurrentAudio() {
   }
 }
 
-async function speakWithTTS(text: string, token: string, signal: AbortSignal): Promise<void> {
-  // Unlock AudioContext during user-gesture window (before async fetch)
-  const ctx = getAudioCtx()
-  await ctx.resume()
-  if (signal.aborted) return
-
-  const res = await fetch('/api/proxy/voice/synthesize', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ text: cleanForTTS(text) }),
-    signal,
-  })
-  if (signal.aborted) return
-  if (!res.ok) throw new Error(`TTS ${res.status}: ${await res.text().catch(() => '')}`)
-
-
-  const arrayBuffer = await res.arrayBuffer()
-  if (signal.aborted) return
-
-  let audioBuffer: AudioBuffer
-  try {
-    audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
-  } catch {
-    // Fallback: HTMLAudioElement if AudioContext decode fails
-    const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' })
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    return new Promise((resolve) => {
-      audio.onended = () => { URL.revokeObjectURL(url); resolve() }
-      audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
-      signal.addEventListener('abort', () => { audio.pause(); URL.revokeObjectURL(url); resolve() }, { once: true })
-      audio.play().catch(() => { URL.revokeObjectURL(url); resolve() })
-    })
-  }
-  if (signal.aborted) return
-
-  const source = ctx.createBufferSource()
-  source.buffer = audioBuffer
-  source.connect(ctx.destination)
-  activeSource = source
-
+function speakWithBrowser(text: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    source.onended = () => { if (activeSource === source) activeSource = null; resolve() }
-    signal.addEventListener('abort', () => {
-      try { source.stop() } catch { /* ok */ }
-      if (activeSource === source) activeSource = null
-      resolve()
-    }, { once: true })
-    source.start()
+    const synth = window.speechSynthesis
+    synth.cancel()
+    const utt = new SpeechSynthesisUtterance(cleanForTTS(text))
+    utt.lang = 'en-US'
+    utt.rate = 1.0
+    utt.pitch = 1.0
+    const trySpeak = () => {
+      const voices = synth.getVoices()
+      const preferred = voices.find((v) => v.lang.startsWith('en') && v.localService) ?? voices.find((v) => v.lang.startsWith('en'))
+      if (preferred) utt.voice = preferred
+      utt.onend = () => resolve()
+      utt.onerror = () => resolve()
+      signal.addEventListener('abort', () => { synth.cancel(); resolve() }, { once: true })
+      synth.speak(utt)
+    }
+    if (synth.getVoices().length > 0) {
+      trySpeak()
+    } else {
+      synth.onvoiceschanged = () => trySpeak()
+    }
   })
+}
+
+async function speakWithTTS(text: string, token: string, signal: AbortSignal): Promise<void> {
+  // Try server TTS first
+  try {
+    const ctx = getAudioCtx()
+    await ctx.resume()
+    if (signal.aborted) return
+
+    const res = await fetch('/api/proxy/voice/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text: cleanForTTS(text) }),
+      signal,
+    })
+    if (signal.aborted) return
+
+    if (res.ok) {
+      const arrayBuffer = await res.arrayBuffer()
+      if (signal.aborted) return
+      try {
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+        if (signal.aborted) return
+        const source = ctx.createBufferSource()
+        source.buffer = audioBuffer
+        source.connect(ctx.destination)
+        activeSource = source
+        return new Promise((resolve) => {
+          source.onended = () => { if (activeSource === source) activeSource = null; resolve() }
+          signal.addEventListener('abort', () => {
+            try { source.stop() } catch { /* ok */ }
+            if (activeSource === source) activeSource = null
+            resolve()
+          }, { once: true })
+          source.start()
+        })
+      } catch {
+        // AudioContext decode failed — try HTMLAudioElement
+        const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' })
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        return new Promise((resolve) => {
+          audio.onended = () => { URL.revokeObjectURL(url); resolve() }
+          audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+          signal.addEventListener('abort', () => { audio.pause(); URL.revokeObjectURL(url); resolve() }, { once: true })
+          audio.play().catch(() => { URL.revokeObjectURL(url); resolve() })
+        })
+      }
+    }
+  } catch (err: any) {
+    if (err?.name === 'AbortError') return
+    // Server TTS failed — fall through to browser TTS
+  }
+
+  // Browser-native TTS fallback (no API key needed, works everywhere)
+  if (!signal.aborted && 'speechSynthesis' in window) {
+    return speakWithBrowser(text, signal)
+  }
 }
 
 // ─── Push notification subscription ──────────────────────────────────────────
