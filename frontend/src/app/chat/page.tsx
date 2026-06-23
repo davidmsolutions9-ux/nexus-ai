@@ -150,6 +150,42 @@ function speakFallback(text: string) {
   else { window.speechSynthesis.onvoiceschanged = doSpeak }
 }
 
+// ─── Push notification subscription ──────────────────────────────────────────
+
+const VAPID_PUBLIC = 'BPLs7z8PfsTFDWMyh5AWsmzTUoW2XGOZG4weT3lAVxsQzl3thFP7N1zK6UsqPz0QvvPPkQTQm-VH7i7Za363NWg'
+
+async function subscribeToPush(token: string | null) {
+  if (!token || !('serviceWorker' in navigator) || !('PushManager' in window)) return
+  try {
+    const perm = await Notification.requestPermission()
+    if (perm !== 'granted') return
+
+    const reg = await navigator.serviceWorker.ready
+    let sub = await reg.pushManager.getSubscription()
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC),
+      })
+    }
+    const json = sub.toJSON()
+    await fetch('/api/proxy/reminders/push-subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }),
+    })
+  } catch { /* push not supported or denied */ }
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  const arr = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i)
+  return arr
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -275,6 +311,7 @@ export default function ChatPage() {
     if (!token) { router.push('/login'); return }
     api.credits.balance().then((b) => setBalance(b.total)).catch(() => {})
     api.memory.notifications().then((r) => { if (r.messages.length > 0) setNotifications(r.messages) }).catch(() => {})
+    subscribeToPush(token)
     // Load conversations then restore session
     ;(async () => {
       try {

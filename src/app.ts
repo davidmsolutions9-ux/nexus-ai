@@ -14,6 +14,8 @@ import { billingRoutes } from './modules/billing/billing.routes'
 import { conversationRoutes } from './modules/conversations/conversations.routes'
 import { memoryRoutes } from './modules/memory/memory.routes'
 import { voiceRoutes } from './modules/voice/voice.routes'
+import { remindersRoutes } from './modules/reminders/reminders.routes'
+import { startReminderScheduler } from './modules/reminders/reminders.scheduler'
 import { refreshPricingCache } from './modules/providers/providers.service'
 import { fail } from './shared/types'
 import { AppError } from './shared/utils/errors'
@@ -110,6 +112,7 @@ export async function buildApp() {
   await app.register(conversationRoutes, { prefix: `${prefix}/conversations` })
   await app.register(memoryRoutes, { prefix: `${prefix}/memory` })
   await app.register(voiceRoutes, { prefix: `${prefix}/voice` })
+  await app.register(remindersRoutes, { prefix: `${prefix}/reminders` })
 
   return app
 }
@@ -122,6 +125,7 @@ async function main() {
 
   await connectDatabase()
   logger.info('Database connected')
+  startReminderScheduler()
 
   await refreshPricingCache()
   logger.info('Pricing cache warmed')

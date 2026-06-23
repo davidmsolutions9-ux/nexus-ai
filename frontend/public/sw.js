@@ -1,4 +1,4 @@
-const CACHE = 'nexus-v1'
+const CACHE = 'nexus-v2'
 const OFFLINE_URL = '/offline'
 
 // Cache app shell on install
@@ -19,6 +19,33 @@ self.addEventListener('activate', (e) => {
     )
   )
   self.clients.claim()
+})
+
+// Push notification received
+self.addEventListener('push', (e) => {
+  const data = e.data ? e.data.json() : { title: 'Nexus', body: 'Tienes un recordatorio', icon: '/icons/icon-192.png' }
+  e.waitUntil(
+    self.registration.showNotification(data.title, {
+      body:  data.body,
+      icon:  data.icon  || '/icons/icon-192.png',
+      badge: data.badge || '/icons/icon-192.png',
+      tag:   data.tag   || 'nexus-reminder',
+      renotify: true,
+      requireInteraction: false,
+    })
+  )
+})
+
+// Notification click → open app
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+      const existing = cs.find((c) => c.url.includes('/chat'))
+      if (existing) return existing.focus()
+      return clients.openWindow('/chat')
+    })
+  )
 })
 
 // Network first, fall back to cache for navigation; cache first for assets
