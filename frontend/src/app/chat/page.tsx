@@ -962,26 +962,25 @@ export default function ChatPage() {
 }
 
 function XLogo({ size = 24, className = '' }: { size?: number; className?: string }) {
+  const pad = Math.round(size * 0.08)
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" className={className}>
-      <defs>
-        <linearGradient id="cbL" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#808898" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#c0c4d8" /><stop offset="100%" stopColor="#606070" />
-        </linearGradient>
-        <linearGradient id="cbR" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#808898" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#c0c4d8" /><stop offset="100%" stopColor="#606070" />
-        </linearGradient>
-        <linearGradient id="cgem" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#90d0ff" /><stop offset="40%" stopColor="#1a70ff" /><stop offset="100%" stopColor="#0030b0" />
-        </linearGradient>
-      </defs>
-      <polygon points="4,1 50,45 50,55 1,4"   fill="url(#cbL)" />
-      <polygon points="96,99 50,55 50,45 99,96" fill="url(#cbL)" />
-      <polygon points="96,1 55,50 45,50 99,4"  fill="url(#cbR)" />
-      <polygon points="4,99 45,50 55,50 1,96"  fill="url(#cbR)" />
-      <polygon points="50,33 67,50 50,67 33,50" fill="url(#cgem)" />
-      <polygon points="50,39 61,50 50,61 39,50" fill="#60b8ff" opacity="0.55" />
-      <polygon points="50,43 57,50 50,57 43,50" fill="white" opacity="0.30" />
-    </svg>
+    <span
+      className={className}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.22),
+        background: '#06101f',
+        flexShrink: 0,
+        overflow: 'hidden',
+        padding: pad,
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-nexus.png" alt="Nexus" width={size - pad * 2} height={size - pad * 2} style={{ display: 'block', objectFit: 'contain' }} />
+    </span>
   )
 }

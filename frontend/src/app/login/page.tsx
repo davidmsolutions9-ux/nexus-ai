@@ -91,26 +91,11 @@ function EyeOff() {
 }
 
 function XLogo({ size = 24 }: { size?: number }) {
+  const pad = Math.round(size * 0.08)
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
-      <defs>
-        <linearGradient id="lbL" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#a0a8c0" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#d8ddf0" /><stop offset="100%" stopColor="#707898" />
-        </linearGradient>
-        <linearGradient id="lbR" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#a0a8c0" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#d8ddf0" /><stop offset="100%" stopColor="#707898" />
-        </linearGradient>
-        <linearGradient id="lgem" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#90d0ff" /><stop offset="40%" stopColor="#1a70ff" /><stop offset="100%" stopColor="#0030b0" />
-        </linearGradient>
-      </defs>
-      <polygon points="5,3 50,44 46,50 3,5" fill="url(#lbL)" />
-      <polygon points="95,97 50,56 54,50 97,95" fill="url(#lbL)" />
-      <polygon points="95,3 56,50 50,44 97,5" fill="url(#lbR)" />
-      <polygon points="5,97 44,50 50,56 3,95" fill="url(#lbR)" />
-      <polygon points="50,35 65,50 50,65 35,50" fill="url(#lgem)" />
-      <polygon points="50,40 60,50 50,60 40,50" fill="#b0e0ff" opacity="0.5" />
-      <polygon points="50,44 56,50 50,56 44,50" fill="white" opacity="0.35" />
-    </svg>
+    <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:size, height:size, borderRadius:Math.round(size*0.22), background:'#06101f', flexShrink:0, overflow:'hidden', padding:pad }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-nexus.png" alt="Nexus" width={size-pad*2} height={size-pad*2} style={{display:'block',objectFit:'contain'}} />
+    </span>
   )
 }
