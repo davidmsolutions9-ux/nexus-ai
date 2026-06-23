@@ -240,6 +240,8 @@ export default function ChatPage() {
   const [copiedIdx, setCopiedIdx]     = useState<number | null>(null)
   const [darkMode, setDarkMode]       = useState(true)
   const [convSearch, setConvSearch]   = useState('')
+  const [listening, setListening]     = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_theme')
@@ -248,11 +250,6 @@ export default function ChatPage() {
 
   useEffect(() => {
     localStorage.setItem('nexus_theme', darkMode ? 'dark' : 'light')
-    document.documentElement.style.setProperty('--bg-main',    darkMode ? '#111827' : '#f3f4f6')
-    document.documentElement.style.setProperty('--bg-sidebar', darkMode ? '#0d1420' : '#e5e7eb')
-    document.documentElement.style.setProperty('--bg-bubble',  darkMode ? '#1d2535' : '#ffffff')
-    document.documentElement.style.setProperty('--text-main',  darkMode ? '#ffffff' : '#111827')
-    document.documentElement.style.setProperty('--border',     darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)')
   }, [darkMode])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [drawerOpen, setDrawerOpen]   = useState(false)
@@ -441,6 +438,23 @@ export default function ChatPage() {
   const activeCfg = SLIDER_CONFIG[sliderMode]
 
   const estimatedCr = input.trim() ? estimateCr(input, history, sliderMode) : null
+
+  function startListening() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) return
+    const rec = new SR()
+    rec.lang = 'es-ES'
+    rec.continuous = false
+    rec.interimResults = false
+    rec.onstart = () => setListening(true)
+    rec.onend   = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    rec.onresult = (e: any) => {
+      const transcript = e.results[0][0].transcript
+      setInput((prev) => prev ? prev + ' ' + transcript : transcript)
+    }
+    rec.start()
+  }
 
   function copyMsg(content: string, idx: number) {
     navigator.clipboard.writeText(content).then(() => {
@@ -644,10 +658,10 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="flex h-screen bg-[#111827] text-white overflow-hidden">
+    <div className="flex h-screen overflow-hidden nx-bg nx-text" data-theme={darkMode ? 'dark' : 'light'} style={{background:'var(--nx-bg)',color:'var(--nx-text)'}}>
 
       {/* Desktop sidebar */}
-      <aside className={`hidden md:flex flex-col shrink-0 border-r border-white/[0.06] bg-[#0d1420] transition-all duration-200 ${sidebarOpen ? 'w-60' : 'w-0 overflow-hidden border-0'}`}>
+      <aside className={`hidden md:flex flex-col shrink-0 border-r transition-all duration-200 ${sidebarOpen ? 'w-60' : 'w-0 overflow-hidden border-0'}`} style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}}>
         <SidebarContent />
       </aside>
 
@@ -655,7 +669,7 @@ export default function ChatPage() {
       {drawerOpen && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setDrawerOpen(false)}>
           <div className="absolute inset-0 bg-black/60" />
-          <div className="absolute left-0 top-0 h-full w-64 bg-[#0d1420] border-r border-white/[0.06] z-50" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute left-0 top-0 h-full w-64 border-r z-50" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}} onClick={(e) => e.stopPropagation()}>
             <SidebarContent />
           </div>
         </div>
@@ -665,7 +679,7 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Header */}
-        <header className="flex items-center gap-2 px-3 py-2.5 border-b border-white/[0.06] shrink-0 bg-[#111827]">
+        <header className="flex items-center gap-2 px-3 py-2.5 border-b shrink-0" style={{background:'var(--nx-header)',borderColor:'var(--nx-border)'}}>
           <button
             onClick={() => { setSidebarOpen((v) => !v); setDrawerOpen((v) => !v) }}
             className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition shrink-0"
@@ -731,8 +745,55 @@ export default function ChatPage() {
             </span>
           </div>
 
-          <div className="w-7 h-7 rounded-full shrink-0 bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center border border-blue-400/30 text-white text-xs font-bold select-none cursor-default" title={email ?? ''}>
-            {email ? email[0].toUpperCase() : '?'}
+          {/* Profile button */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowProfile((v) => !v)}
+              className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center border border-blue-400/30 text-white text-xs font-bold"
+              title={email ?? ''}
+            >
+              {email ? email[0].toUpperCase() : '?'}
+            </button>
+            {showProfile && (
+              <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl shadow-2xl border z-30 overflow-hidden" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}}>
+                {/* User info */}
+                <div className="px-4 py-3 border-b" style={{borderColor:'var(--nx-border)'}}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-sm font-bold">
+                      {email ? email[0].toUpperCase() : '?'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-white/80 truncate">{email}</div>
+                      <div className="text-[10px] text-blue-400">Plan gratuito · {balance !== null ? `${balance.toFixed(0)} cr` : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+                {/* Actions */}
+                <div className="p-2 flex flex-col gap-0.5">
+                  <button
+                    onClick={() => { setShowProfile(false); window.location.href = '/memory' }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition text-left"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                    Mi memoria
+                  </button>
+                  <div className="px-3 py-2 rounded-xl border border-white/[0.06] opacity-50 cursor-not-allowed">
+                    <div className="flex items-center gap-2.5">
+                      <svg width="13" height="13" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                      <span className="text-xs text-gray-500">Continuar con Google <span className="text-[10px] text-blue-500/60 ml-1">Próximamente</span></span>
+                    </div>
+                  </div>
+                  <div className="my-1 border-t" style={{borderColor:'var(--nx-border)'}} />
+                  <button
+                    onClick={() => { setShowProfile(false); logout(); router.push('/') }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-red-400 hover:text-red-300 hover:bg-red-500/[0.08] transition text-left"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M5 2H2.5A.5.5 0 0 0 2 2.5v9a.5.5 0 0 0 .5.5H5M9 10l3-3-3-3M12 7H5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    Cerrar sesión
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </header>
 
@@ -791,7 +852,7 @@ export default function ChatPage() {
                       ? 'bg-[#1A56DB] text-white rounded-br-sm'
                       : msg.error
                         ? 'bg-red-950/40 border border-red-900/40 text-red-400 rounded-bl-sm'
-                        : 'bg-[#1d2535] text-gray-100 rounded-bl-sm'
+                        : 'rounded-bl-sm'
                   }`}>
                     {msg.content}
                   </div>
@@ -872,10 +933,10 @@ export default function ChatPage() {
         </div>
 
         {/* Input bar */}
-        <div className="border-t border-white/[0.06] bg-[#111827] px-3 pb-safe pt-2 shrink-0" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
+        <div className="border-t px-3 pb-safe pt-2 shrink-0" style={{background:'var(--nx-header)',borderColor:'var(--nx-border)',paddingBottom:'max(12px, env(safe-area-inset-bottom))'}}>
           <div className="max-w-2xl mx-auto flex flex-col gap-1.5">
 
-            <div className="flex items-end gap-2 bg-[#1d2535] border border-white/[0.08] focus-within:border-blue-500/40 rounded-2xl px-3 py-2.5 transition">
+            <div className="flex items-end gap-2 border focus-within:border-blue-500/40 rounded-2xl px-3 py-2.5 transition" style={{background:'var(--nx-input)',borderColor:'var(--nx-border)'}}>
               <textarea
                 ref={inputRef}
                 value={input}
@@ -887,11 +948,24 @@ export default function ChatPage() {
                 className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 resize-none focus:outline-none leading-relaxed disabled:opacity-50"
                 style={{ maxHeight: '120px', overflowY: 'auto' }}
               />
+              {/* Microphone */}
+              <button
+                onClick={startListening}
+                disabled={loading}
+                title={listening ? 'Escuchando…' : 'Hablar'}
+                className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition ${listening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <rect x="9" y="2" width="6" height="11" rx="3"/>
+                  <path d="M5 10a7 7 0 0 0 14 0M12 19v3M8 22h8"/>
+                </svg>
+              </button>
+              {/* Send */}
               <button
                 onClick={() => sendMessage()}
                 disabled={loading || !input.trim()}
                 className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition disabled:opacity-20"
-                style={{ background: input.trim() ? 'linear-gradient(135deg,#1a48cc,#2a88ff)' : '#2a3347' }}
+                style={{ background: input.trim() ? 'linear-gradient(135deg,#1a48cc,#2a88ff)' : 'var(--nx-bubble-ai,#2a3347)' }}
               >
                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                   <path d="M12 1L5.5 7.5M12 1L8.5 12 5.5 7.5 1 4.5l11-3.5z" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -949,7 +1023,8 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {showAIMenu && <div className="fixed inset-0 z-10" onClick={() => setShowAIMenu(false)} />}
+      {showAIMenu   && <div className="fixed inset-0 z-10"  onClick={() => setShowAIMenu(false)} />}
+      {showProfile  && <div className="fixed inset-0 z-20"  onClick={() => setShowProfile(false)} />}
     </div>
   )
 }
