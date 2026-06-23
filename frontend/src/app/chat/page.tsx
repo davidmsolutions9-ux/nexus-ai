@@ -227,6 +227,9 @@ export default function ChatPage() {
   const [drawerOpen, setDrawerOpen]   = useState(false)
   const [showAIMenu, setShowAIMenu]         = useState(false)
   const [notifications, setNotifications]   = useState<string[]>([])
+  const [voiceMode, setVoiceMode]           = useState(false)
+  const voiceModeRef = useRef(false)
+  const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
 
@@ -412,25 +415,115 @@ export default function ChatPage() {
 
   const estimatedCr = input.trim() ? estimateCr(input, history, sliderMode) : null
 
-  function startListening() {
-    // Stop mic if already listening
-    if (listening) { setListening(false); return }
-
+  function openMicForVoiceMode() {
+    if (!voiceModeRef.current) return
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) {
-      alert('Tu navegador no soporta reconocimiento de voz. Prueba Chrome o Safari.')
+    if (!SR) return
+    const rec = new SR()
+    rec.lang = 'es-ES'
+    rec.continuous = true
+    rec.interimResults = false
+    rec.onstart = () => setListening(true)
+    rec.onend   = () => {
+      setListening(false)
+      // If voice mode still active and timer not already running, keep silence timer
+    }
+    rec.onerror = () => setListening(false)
+    rec.onresult = (e: any) => {
+      const transcript = e.results[e.results.length - 1][0].transcript
+      setInput((prev) => prev ? prev + ' ' + transcript : transcript)
+      // Reset silence timer on each result
+      if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+      voiceTimerRef.current = setTimeout(() => {
+        rec.stop()
+        // Auto-send after 5s silence
+        setInput((prev) => {
+          if (prev.trim()) {
+            setTimeout(() => sendMessageFromVoice(prev.trim()), 50)
+          }
+          return prev
+        })
+      }, 5000)
+    }
+    // Auto-close mic after 5s if nothing spoken
+    if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+    voiceTimerRef.current = setTimeout(() => {
+      rec.stop()
+      setVoiceMode(false)
+      voiceModeRef.current = false
+    }, 5000)
+    try { rec.start() } catch { setListening(false) }
+  }
+
+  function sendMessageFromVoice(text: string) {
+    if (!text.trim() || !token) return
+    setInput('')
+    // Trigger send with the provided text
+    const userMsg: Message = { role: 'user', content: text }
+    setMessages((prev) => [...prev, userMsg])
+    const newHistory = [...history, { role: 'user' as const, content: text }]
+    setHistory(newHistory)
+    setLoading(true)
+
+    const cfg = SLIDER_CONFIG[sliderMode]
+    fetch('/api/proxy/orchestrator/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ prompt: text, sliderMode, forceProvider: selectedAI === 'auto' ? undefined : selectedAI, messages: newHistory.slice(-20), systemPrompt: cfg.systemPrompt, noMemory: !memoryOn }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const reply = data?.data?.responseText ?? 'Sin respuesta.'
+        const aiMsg: Message = { role: 'assistant', content: reply, provider: data?.data?.provider, model: data?.data?.model }
+        setMessages((prev) => [...prev, aiMsg])
+        setHistory((prev) => [...prev, { role: 'assistant', content: reply }])
+        // Auto-speak reply then reopen mic
+        if (voiceModeRef.current && token) {
+          const abort = new AbortController()
+          activeAbort = abort
+          speakWithTTS(reply, token, abort.signal).finally(() => {
+            if (activeAbort === abort) activeAbort = null
+            setSpeakingIdx(null)
+            // Reopen mic for 5 seconds
+            if (voiceModeRef.current) openMicForVoiceMode()
+          })
+        }
+      })
+      .catch(() => {
+        setMessages((prev) => [...prev, { role: 'assistant', content: 'Error de conexión.', error: true }])
+      })
+      .finally(() => setLoading(false))
+  }
+
+  function toggleVoiceMode() {
+    if (voiceMode) {
+      voiceModeRef.current = false
+      setVoiceMode(false)
+      setListening(false)
+      if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+      stopCurrentAudio()
       return
     }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) { alert('Tu navegador no soporta reconocimiento de voz.'); return }
+    if (navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(() => { voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode() })
+        .catch(() => alert('Necesitas dar permiso al micrófono.'))
+    } else {
+      voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode()
+    }
+  }
 
-    // On iOS, request microphone permission explicitly before starting
+  function startListening() {
+    if (listening) { setListening(false); return }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) { alert('Tu navegador no soporta reconocimiento de voz. Prueba Chrome o Safari.'); return }
     if (navigator.mediaDevices?.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
         .then(() => startRec())
         .catch(() => alert('Necesitas dar permiso al micrófono en los ajustes del navegador.'))
-    } else {
-      startRec()
-    }
-
+    } else { startRec() }
     function startRec() {
       const rec = new SR()
       rec.lang = 'es-ES'
@@ -438,14 +531,8 @@ export default function ChatPage() {
       rec.interimResults = false
       rec.onstart  = () => setListening(true)
       rec.onend    = () => setListening(false)
-      rec.onerror  = (e: any) => {
-        setListening(false)
-        if (e.error === 'not-allowed') alert('Permiso de micrófono denegado.')
-      }
-      rec.onresult = (e: any) => {
-        const transcript = e.results[0][0].transcript
-        setInput((prev) => prev ? prev + ' ' + transcript : transcript)
-      }
+      rec.onerror  = (e: any) => { setListening(false); if (e.error === 'not-allowed') alert('Permiso de micrófono denegado.') }
+      rec.onresult = (e: any) => { const t = e.results[0][0].transcript; setInput((prev) => prev ? prev + ' ' + t : t) }
       try { rec.start() } catch { setListening(false) }
     }
   }
@@ -802,29 +889,56 @@ export default function ChatPage() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-8 flex flex-col gap-4 sm:gap-6">
+        <div className="flex-1 overflow-y-auto relative">
 
-            {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-24 text-center select-none">
-                <XLogo size={40} className="mb-5 opacity-10" />
-                <h2 className="text-xl font-light text-gray-400 mb-2">¿En qué puedo ayudarte?</h2>
-                <p className="text-sm text-gray-700 mb-8">
+          {/* Nebula background — only shown when chat is empty */}
+          {messages.length === 0 && (
+            <div className="nx-nebula-bg" aria-hidden="true"><span /></div>
+          )}
+
+          {messages.length === 0 ? (
+            /* ── Empty state: avatar top, prompts bottom ── */
+            <div className="relative z-10 flex flex-col h-full min-h-[calc(100vh-120px)]">
+              {/* Avatar */}
+              <div className="flex-1 flex items-center justify-center overflow-hidden">
+                <div className="relative w-full max-w-xs sm:max-w-sm mx-auto" style={{maskImage:'linear-gradient(to bottom, black 50%, transparent 100%)', WebkitMaskImage:'linear-gradient(to bottom, black 50%, transparent 100%)'}}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/nexus-avatar.png"
+                    alt="Nexus AI"
+                    style={{
+                      width: '100%',
+                      objectFit: 'contain',
+                      mixBlendMode: darkMode ? 'screen' : 'multiply',
+                      opacity: darkMode ? 0.92 : 0.8,
+                      display: 'block',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Bottom: greeting + suggestions */}
+              <div className="shrink-0 px-4 pb-4 text-center select-none">
+                <h2 className="text-lg font-light mb-1" style={{color:'var(--nx-text)'}}>¿En qué puedo ayudarte?</h2>
+                <p className="text-xs mb-4" style={{color:'var(--nx-text-sub)'}}>
                   {activeCfg.icon} Modo {activeCfg.label} · {activeAI.label}
                 </p>
-                <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+                <div className="grid grid-cols-2 gap-2 w-full max-w-sm mx-auto">
                   {['Escribe un email profesional', 'Explícame cómo funciona la IA', 'Resume este texto', 'Crea un plan de negocio'].map((p) => (
                     <button
                       key={p}
                       onClick={() => setInput(p)}
-                      className="px-3 py-2.5 text-left text-xs text-gray-500 hover:text-gray-300 border border-white/[0.06] hover:border-white/10 rounded-xl transition bg-white/[0.02] hover:bg-white/[0.04]"
+                      className="px-3 py-2.5 text-left text-xs rounded-xl transition"
+                      style={{color:'var(--nx-text-sub)',border:'1px solid var(--nx-border)',background:'var(--nx-bubble-ai)'}}
                     >
                       {p}
                     </button>
                   ))}
                 </div>
               </div>
-            )}
+            </div>
+          ) : (
+          <div className="max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-8 flex flex-col gap-4 sm:gap-6">
 
             {messages.map((msg, i) => (
               <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -917,6 +1031,7 @@ export default function ChatPage() {
             )}
             <div ref={bottomRef} />
           </div>
+          )}
         </div>
 
         {/* Input bar */}
@@ -935,14 +1050,28 @@ export default function ChatPage() {
                 className="flex-1 bg-transparent text-sm resize-none focus:outline-none leading-relaxed disabled:opacity-50"
                 style={{ maxHeight: '120px', overflowY: 'auto', color: 'var(--nx-text)' }}
               />
-              {/* Microphone */}
+              {/* Voice conversation mode */}
               <button
-                onClick={startListening}
+                onClick={toggleVoiceMode}
                 disabled={loading}
-                title={listening ? 'Escuchando…' : 'Hablar'}
-                className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition ${listening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'}`}
+                title={voiceMode ? 'Salir del modo conversación' : 'Conversación por voz'}
+                className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition ${voiceMode ? 'bg-blue-600 text-white animate-pulse' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'}`}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+              </button>
+              {/* Microphone (single shot) */}
+              <button
+                onClick={startListening}
+                disabled={loading || voiceMode}
+                title={listening ? 'Escuchando…' : 'Dictado'}
+                className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-xl transition ${listening ? 'bg-red-500/20 text-red-400 animate-pulse' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'}`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <rect x="9" y="2" width="6" height="11" rx="3"/>
                   <path d="M5 10a7 7 0 0 0 14 0M12 19v3M8 22h8"/>
                 </svg>
