@@ -2,7 +2,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { useAuth } from '@/store/auth'
 import { api, type ConversationSummary } from '@/lib/api'
 
@@ -24,8 +23,6 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
 // ─── Nexus voice ──────────────────────────────────────────────────────────────
 
 let currentUtterance: SpeechSynthesisUtterance | null = null
-let activeAbort: AbortController | null = null
-let activeSpeechText: string | null = null
 
 function cleanForTTS(text: string): string {
   return text
@@ -38,16 +35,31 @@ function cleanForTTS(text: string): string {
     .replace(/^\s*[-*]\s/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-    .slice(0, 500) // keep short for reliability
+    .slice(0, 1500)
 }
 
 function stopCurrentAudio() {
-  activeAbort?.abort()
-  activeAbort = null
   if (currentUtterance) {
     window.speechSynthesis?.cancel()
     currentUtterance = null
   }
+}
+
+// Pre-warm voices on first call so subsequent calls are instant
+let voicesReady = false
+function ensureVoices(): Promise<SpeechSynthesisVoice[]> {
+  return new Promise((resolve) => {
+    if (!('speechSynthesis' in window)) { resolve([]); return }
+    const vs = window.speechSynthesis.getVoices()
+    if (vs.length > 0) { voicesReady = true; resolve(vs); return }
+    const handler = () => {
+      voicesReady = true
+      resolve(window.speechSynthesis.getVoices())
+    }
+    window.speechSynthesis.addEventListener('voiceschanged', handler, { once: true })
+    // Fallback timeout — some browsers never fire voiceschanged
+    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1000)
+  })
 }
 
 function speakText(text: string): Promise<void> {
@@ -55,29 +67,35 @@ function speakText(text: string): Promise<void> {
     if (!('speechSynthesis' in window)) { resolve(); return }
     const synth = window.speechSynthesis
     synth.cancel()
+    currentUtterance = null
 
-    const utt = new SpeechSynthesisUtterance(cleanForTTS(text))
-    utt.lang = 'en-US'
-    utt.rate = 0.95
-    utt.pitch = 1.0
-    utt.volume = 1.0
-    utt.onend   = () => { currentUtterance = null; resolve() }
-    utt.onerror = (e) => { currentUtterance = null; resolve() }
-    currentUtterance = utt
+    const cleaned = cleanForTTS(text)
+    if (!cleaned) { resolve(); return }
 
-    // Pick best English voice
-    const pick = () => {
-      const vs = synth.getVoices()
-      const v = vs.find((x) => x.lang === 'en-US' && x.localService)
-        ?? vs.find((x) => x.lang.startsWith('en') && x.localService)
-        ?? vs.find((x) => x.lang.startsWith('en'))
+    const doSpeak = (voices: SpeechSynthesisVoice[]) => {
+      const utt = new SpeechSynthesisUtterance(cleaned)
+      utt.lang = 'en-US'
+      utt.rate = 0.95
+      utt.pitch = 1.0
+      utt.volume = 1.0
+
+      const v = voices.find((x) => x.lang === 'en-US' && x.localService)
+        ?? voices.find((x) => x.lang.startsWith('en') && x.localService)
+        ?? voices.find((x) => x.lang.startsWith('en'))
+        ?? voices[0]
       if (v) utt.voice = v
+
+      utt.onend   = () => { currentUtterance = null; resolve() }
+      utt.onerror = () => { currentUtterance = null; resolve() }
+      currentUtterance = utt
+      synth.speak(utt)
     }
-    pick()
-    synth.speak(utt)
-    // If voices weren't ready, try updating voice (won't restart utterance but sets default)
-    if (synth.getVoices().length === 0) {
-      synth.onvoiceschanged = () => { synth.onvoiceschanged = null; pick() }
+
+    const existing = synth.getVoices()
+    if (existing.length > 0) {
+      doSpeak(existing)
+    } else {
+      ensureVoices().then(doSpeak)
     }
   })
 }
@@ -207,10 +225,13 @@ export default function ChatPage() {
   const [listening, setListening]     = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [audioError, setAudioError]   = useState<string | null>(null)
+  const [topUpMsg, setTopUpMsg]       = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_theme')
     if (saved === 'light') setDarkMode(false)
+    // Pre-warm speech synthesis voices so first speak is instant
+    if ('speechSynthesis' in window) ensureVoices()
   }, [])
 
   useEffect(() => {
@@ -497,40 +518,60 @@ export default function ChatPage() {
     try { rec.start() } catch { setListening(false) }
   }
 
-  function sendMessageFromVoice(text: string) {
+  async function sendMessageFromVoice(text: string) {
     if (!text.trim() || !token) return
     setInput('')
-    // Trigger send with the provided text
+
+    const mode = sliderMode
+    const cfg  = SLIDER_CONFIG[mode]
     const userMsg: Message = { role: 'user', content: text }
+
     setMessages((prev) => [...prev, userMsg])
     const newHistory = [...history, { role: 'user' as const, content: text }]
     setHistory(newHistory)
     setLoading(true)
 
-    const cfg = SLIDER_CONFIG[sliderMode]
-    fetch('/api/proxy/orchestrator/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ prompt: text, sliderMode, forceProvider: selectedAI === 'auto' ? undefined : selectedAI, messages: newHistory.slice(-20), systemPrompt: cfg.systemPrompt, noMemory: !memoryOn }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const reply = data?.data?.responseText ?? 'Sin respuesta.'
-        const aiMsg: Message = { role: 'assistant', content: reply, provider: data?.data?.provider, model: data?.data?.model }
-        setMessages((prev) => [...prev, aiMsg])
-        setHistory((prev) => [...prev, { role: 'assistant', content: reply }])
-        // Auto-speak reply then reopen mic
-        if (voiceModeRef.current) {
-          speakText(reply).finally(() => {
-            // After speaking, reopen mic for 5s window
-            if (voiceModeRef.current) openMicForVoiceMode(true)
-          })
-        }
+    try {
+      // Create or reuse conversation
+      let convId = activeConvId
+      if (!convId) {
+        const conv = await api.conversations.create(makeTitle(text))
+        convId = conv.id
+        setActiveConvId(convId)
+        localStorage.setItem('nexus_active_conv', JSON.stringify({ convId, timestamp: Date.now() }))
+      }
+      await api.conversations.addMessage(convId, { role: 'user', content: text, sliderMode: mode })
+
+      const result = await api.chat.complete({
+        prompt: text,
+        sliderMode: mode,
+        maxTokens: 1000,
+        messages: newHistory,
+        systemPrompt: cfg.systemPrompt,
+        noMemory: !memoryOn,
+        ...(selectedAI !== 'auto' ? { forceProvider: selectedAI } : {}),
       })
-      .catch(() => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: 'Connection error.', error: true }])
-      })
-      .finally(() => setLoading(false))
+
+      const reply = result.responseText ?? ''
+      const aiMsg: Message = { role: 'assistant', content: reply, provider: result.provider, model: result.model, credits: result.creditCost, sliderMode: mode }
+      setMessages((prev) => [...prev, aiMsg])
+      setHistory((prev) => [...prev, { role: 'assistant', content: reply }])
+      setBalance((prev) => prev !== null ? Math.max(0, prev - result.creditCost) : null)
+
+      await api.conversations.addMessage(convId, { role: 'assistant', content: reply, sliderMode: mode, provider: result.provider, model: result.model, creditCost: result.creditCost })
+      loadConversations()
+      if (convId) localStorage.setItem('nexus_active_conv', JSON.stringify({ convId, timestamp: Date.now() }))
+
+      if (voiceModeRef.current && reply) {
+        speakText(reply).finally(() => {
+          if (voiceModeRef.current) openMicForVoiceMode(true)
+        })
+      }
+    } catch {
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Connection error.', error: true }])
+    } finally {
+      setLoading(false)
+    }
   }
 
   function toggleVoiceMode() {
@@ -565,20 +606,13 @@ export default function ChatPage() {
   function speakMsg(content: string, idx: number) {
     if (speakingIdx === idx) {
       stopCurrentAudio()
-      activeSpeechText = null
       setSpeakingIdx(null)
       return
     }
     stopCurrentAudio()
     setSpeakingIdx(idx)
-    activeSpeechText = content
     setAudioError(null)
-
-    speakText(content)
-      .then(() => {
-        setSpeakingIdx((cur) => cur === idx ? null : cur)
-        activeSpeechText = null
-      })
+    speakText(content).then(() => setSpeakingIdx((cur) => cur === idx ? null : cur))
   }
 
   // ── Sidebar ─────────────────────────────────────────────────────────────────
@@ -703,19 +737,40 @@ export default function ChatPage() {
           <span>{darkMode ? 'Light' : 'Dark'}</span>
         </button>
 
-        {/* Memory */}
+        {/* Memory — brain icon */}
         <Link
           href="/memory"
-          title="Mi memoria"
+          title="Memory"
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border border-white/[0.08] bg-white/[0.04] text-gray-400 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-600/10 transition"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9.5 2A2.5 2.5 0 0 0 7 4.5v.5A2.5 2.5 0 0 0 4.5 7.5c0 1 .6 1.9 1.5 2.3V12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2.2c.9-.4 1.5-1.3 1.5-2.3A2.5 2.5 0 0 0 17 4.5v-.5A2.5 2.5 0 0 0 14.5 2h-5z"/>
-            <path d="M9 10h.01M12 10h.01M15 10h.01"/>
-            <path d="M8 14v3M12 14v3M16 14v3"/>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5a7 7 0 0 0-7 7c0 1.9.76 3.62 2 4.9V19a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2.1A7 7 0 0 0 12 5z"/>
+            <path d="M9 19v1M12 19v1M15 19v1"/>
+            <path d="M9 9c0-1.1.9-2 2-2"/>
+            <path d="M15 12h.01M12 12h.01M9 12h.01"/>
           </svg>
           <span>Memory</span>
         </Link>
+
+        {/* Top up — coin icon */}
+        <div className="relative flex-1">
+          {topUpMsg && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap text-[10px] text-gray-300 bg-[#1a2030] border border-white/[0.08] px-2 py-1 rounded-lg shadow-lg pointer-events-none">
+              Reload not available
+            </div>
+          )}
+          <button
+            onClick={() => { setTopUpMsg(true); setTimeout(() => setTopUpMsg(false), 2000) }}
+            title="Top up"
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border border-white/[0.08] bg-white/[0.04] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M12 7v10M9.5 9.5C9.5 8.4 10.6 8 12 8s2.5.4 2.5 1.5-1 1.5-2.5 1.5-2.5.6-2.5 1.5S10.6 14 12 14s2.5-.4 2.5-1.5"/>
+            </svg>
+            <span>Top up</span>
+          </button>
+        </div>
 
         {/* Logout */}
         <button
@@ -848,7 +903,7 @@ export default function ChatPage() {
                     onClick={() => { setShowProfile(false); window.location.href = '/memory' }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition text-left"
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5a7 7 0 0 0-7 7c0 1.9.76 3.62 2 4.9V19a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2.1A7 7 0 0 0 12 5z"/><path d="M9 19v1M12 19v1M15 19v1"/><path d="M9 9c0-1.1.9-2 2-2"/><path d="M15 12h.01M12 12h.01M9 12h.01"/></svg>
                     My memory
                   </button>
                   <div className="px-3 py-2 rounded-xl border border-white/[0.06] opacity-50 cursor-not-allowed">
