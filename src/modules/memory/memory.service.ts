@@ -193,9 +193,15 @@ async function generateNotifications(
         ? `Mañana: ${fact.value}`
         : `En ${daysUntil} días: ${fact.value}`
 
-    await prisma.proactiveNotification.create({
-      data: { userId, message: msg, type: 'event', scheduledFor: now },
-    }).catch(() => {})
+    // Avoid creating duplicate notifications for the same event
+    const existing = await prisma.proactiveNotification.findFirst({
+      where: { userId, message: msg, seen: false },
+    }).catch(() => null)
+    if (!existing) {
+      await prisma.proactiveNotification.create({
+        data: { userId, message: msg, type: 'event', scheduledFor: now },
+      }).catch(() => {})
+    }
   }
 
   // Check birthdays in relationships
@@ -213,9 +219,14 @@ async function generateNotifications(
         ? `El cumpleaños de ${who} es en ${daysUntil} días. ¿Has pensado en el regalo?`
         : `El cumpleaños de ${who} es en ${daysUntil} días.`
 
-    await prisma.proactiveNotification.create({
-      data: { userId, message: msg, type: 'birthday', scheduledFor: now },
-    }).catch(() => {})
+    const existingBday = await prisma.proactiveNotification.findFirst({
+      where: { userId, message: msg, seen: false },
+    }).catch(() => null)
+    if (!existingBday) {
+      await prisma.proactiveNotification.create({
+        data: { userId, message: msg, type: 'birthday', scheduledFor: now },
+      }).catch(() => {})
+    }
   }
 }
 
