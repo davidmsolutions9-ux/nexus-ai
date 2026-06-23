@@ -59,22 +59,39 @@ function stopCurrentAudio() {
 }
 
 async function speakWithTTS(text: string, token: string, signal: AbortSignal): Promise<void> {
+  // Unlock AudioContext during user-gesture window (before async fetch)
+  const ctx = getAudioCtx()
+  await ctx.resume()
+  if (signal.aborted) return
+
   const res = await fetch('/api/proxy/voice/synthesize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ text: cleanForTTS(text) }),
     signal,
   })
-  if (!res.ok || signal.aborted) return
+  if (signal.aborted) return
+  if (!res.ok) throw new Error(`TTS ${res.status}: ${await res.text().catch(() => '')}`)
+
 
   const arrayBuffer = await res.arrayBuffer()
   if (signal.aborted) return
 
-  const ctx = getAudioCtx()
-  await ctx.resume()
-  if (signal.aborted) return
-
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+  let audioBuffer: AudioBuffer
+  try {
+    audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+  } catch {
+    // Fallback: HTMLAudioElement if AudioContext decode fails
+    const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' })
+    const url = URL.createObjectURL(blob)
+    const audio = new Audio(url)
+    return new Promise((resolve) => {
+      audio.onended = () => { URL.revokeObjectURL(url); resolve() }
+      audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+      signal.addEventListener('abort', () => { audio.pause(); URL.revokeObjectURL(url); resolve() }, { once: true })
+      audio.play().catch(() => { URL.revokeObjectURL(url); resolve() })
+    })
+  }
   if (signal.aborted) return
 
   const source = ctx.createBufferSource()
@@ -153,19 +170,19 @@ const SLIDER_CONFIG: Record<SliderMode, {
   ECONOMIC: {
     label: 'Eco',
     creditCost: 0.5,
-    systemPrompt: 'You are Nexus AI in Eco mode. Respond concisely and directly. The model running you is specified in the model system prompt — that is the only model you use. NEVER claim you have switched models.',
+    systemPrompt: 'You are Nexus AI in Eco mode. ALWAYS respond in English regardless of the language the user writes in. Respond concisely and directly. The model running you is specified in the model system prompt — that is the only model you use. NEVER claim you have switched models.',
     badge: 'Eco',
   },
   AUTO: {
     label: 'Auto',
     creditCost: 1.2,
-    systemPrompt: 'You are Nexus AI. The Nexus AI orchestrator selects the model based on the slider mode (Eco, Auto, Pro) and provider availability. The exact model running THIS response is specified in the model system prompt — that is the only model you are using now. If asked which model you are using, state exactly the one in the model system prompt. NEVER say you switched to a different model during the conversation.',
+    systemPrompt: 'You are Nexus AI. ALWAYS respond in English regardless of the language the user writes in. The Nexus AI orchestrator selects the model based on the slider mode (Eco, Auto, Pro) and provider availability. The exact model running THIS response is specified in the model system prompt — that is the only model you are using now. If asked which model you are using, state exactly the one in the model system prompt. NEVER say you switched to a different model during the conversation.',
     badge: 'Auto',
   },
   PRO: {
     label: 'Pro',
     creditCost: 3.5,
-    systemPrompt: 'You are Nexus AI in Pro mode. Provide complete, detailed, highest-quality responses. The model running you is specified in the model system prompt. NEVER claim you switched to another model during the conversation. If asked about the model, state exactly the one from the model system prompt.',
+    systemPrompt: 'You are Nexus AI in Pro mode. ALWAYS respond in English regardless of the language the user writes in. Provide complete, detailed, highest-quality responses. The model running you is specified in the model system prompt. NEVER claim you switched to another model during the conversation. If asked about the model, state exactly the one from the model system prompt.',
     badge: 'Pro',
     upsell: 'Claude Opus and GPT-4o available on Plus and Pro plans',
   },
@@ -217,6 +234,7 @@ export default function ChatPage() {
   const [convSearch, setConvSearch]   = useState('')
   const [listening, setListening]     = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+  const [audioError, setAudioError]   = useState<string | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_theme')
@@ -422,39 +440,46 @@ export default function ChatPage() {
     if (!voiceModeRef.current) return
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) return
+
     const rec = new SR()
     rec.lang = 'en-US'
-    rec.continuous = true
+    rec.continuous = false
     rec.interimResults = false
+
+    let accumulated = ''
+
     rec.onstart = () => setListening(true)
     rec.onend   = () => {
       setListening(false)
-      // If voice mode still active and timer not already running, keep silence timer
+      if (!voiceModeRef.current) return
+      if (accumulated.trim()) {
+        sendMessageFromVoice(accumulated.trim())
+        accumulated = ''
+      } else {
+        // Nothing spoken — reopen mic after short pause
+        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 1000)
+      }
     }
-    rec.onerror = () => setListening(false)
+    rec.onerror = (e: any) => {
+      setListening(false)
+      if (e.error === 'no-speech' && voiceModeRef.current) {
+        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 500)
+      } else if (e.error === 'not-allowed') {
+        setAudioError('Microphone access denied. Check browser permissions.')
+        setTimeout(() => setAudioError(null), 5000)
+        voiceModeRef.current = false
+        setVoiceMode(false)
+      } else if (e.error !== 'aborted' && voiceModeRef.current) {
+        setAudioError(`Mic error: ${e.error}`)
+        setTimeout(() => setAudioError(null), 4000)
+      }
+    }
     rec.onresult = (e: any) => {
-      const transcript = e.results[e.results.length - 1][0].transcript
-      setInput((prev) => prev ? prev + ' ' + transcript : transcript)
-      // Reset silence timer on each result
-      if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
-      voiceTimerRef.current = setTimeout(() => {
-        rec.stop()
-        // Auto-send after 5s silence
-        setInput((prev) => {
-          if (prev.trim()) {
-            setTimeout(() => sendMessageFromVoice(prev.trim()), 50)
-          }
-          return prev
-        })
-      }, 5000)
+      accumulated = Array.from(e.results).map((r: any) => r[0].transcript).join(' ')
+      setInput(accumulated)
     }
-    // Auto-close mic after 5s if nothing spoken
+
     if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
-    voiceTimerRef.current = setTimeout(() => {
-      rec.stop()
-      setVoiceMode(false)
-      voiceModeRef.current = false
-    }, 5000)
     try { rec.start() } catch { setListening(false) }
   }
 
@@ -508,13 +533,21 @@ export default function ChatPage() {
       return
     }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) { alert('Your browser does not support voice recognition. Try Chrome or Safari.'); return }
+    if (!SR) {
+      setAudioError('Voice recognition not supported. Use Chrome or Safari.')
+      setTimeout(() => setAudioError(null), 4000)
+      return
+    }
+    const startVoice = () => { voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode() }
     if (navigator.mediaDevices?.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(() => { voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode() })
-        .catch(() => alert('Microphone permission is required.'))
+        .then(startVoice)
+        .catch((err) => {
+          setAudioError(`Mic permission denied: ${err?.message ?? err}`)
+          setTimeout(() => setAudioError(null), 5000)
+        })
     } else {
-      voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode()
+      startVoice()
     }
   }
 
@@ -544,7 +577,12 @@ export default function ChatPage() {
     const abort = new AbortController()
     activeAbort = abort
 
+    setAudioError(null)
     speakWithTTS(content, token, abort.signal)
+      .catch((err) => {
+        setAudioError(`Audio error: ${err?.message ?? 'failed'}`)
+        setTimeout(() => setAudioError(null), 4000)
+      })
       .finally(() => {
         if (activeAbort === abort) activeAbort = null
         setSpeakingIdx((cur) => cur === idx ? null : cur)
@@ -685,18 +723,6 @@ export default function ChatPage() {
           </svg>
           <span>Memory</span>
         </Link>
-
-        {/* Credits recharge */}
-        <button
-          title="Top up credits"
-          onClick={() => window.open('mailto:david.m.solutions9@gmail.com?subject=Nexus%20AI%20Top-up', '_blank')}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border border-white/[0.08] bg-white/[0.04] text-gray-400 hover:text-green-400 hover:border-green-500/30 hover:bg-green-600/10 transition"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
-          </svg>
-          <span>Top up</span>
-        </button>
 
         {/* Logout */}
         <button
@@ -852,6 +878,19 @@ export default function ChatPage() {
           </div>
         </header>
 
+        {/* Audio error banner */}
+        {audioError && (
+          <div className="border-b border-red-500/20 bg-red-500/5 px-4 py-2 shrink-0">
+            <div className="max-w-2xl mx-auto flex items-center gap-2">
+              <span className="text-red-400 text-xs shrink-0">⚠</span>
+              <p className="text-xs text-red-300/80 flex-1">{audioError}</p>
+              <button onClick={() => setAudioError(null)} className="text-gray-600 hover:text-gray-400 shrink-0">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Proactive notifications banner */}
         {notifications.length > 0 && (
           <div className="border-b border-yellow-500/20 bg-yellow-500/5 px-4 py-2.5 shrink-0">
@@ -885,8 +924,8 @@ export default function ChatPage() {
                 <div
                   className="relative w-full max-w-xs sm:max-w-sm mx-auto"
                   style={{
-                    maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
-                    WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)',
+                    maskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
+                    WebkitMaskImage: 'linear-gradient(to bottom, black 80%, transparent 100%)',
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
