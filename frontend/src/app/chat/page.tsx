@@ -62,23 +62,41 @@ function speakWithBrowser(text: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const synth = window.speechSynthesis
     synth.cancel()
+    if (signal.aborted) { resolve(); return }
+
     const utt = new SpeechSynthesisUtterance(cleanForTTS(text))
     utt.lang = 'en-US'
     utt.rate = 1.0
     utt.pitch = 1.0
-    const trySpeak = () => {
+    utt.volume = 1.0
+    utt.onend = () => resolve()
+    utt.onerror = () => resolve()
+    signal.addEventListener('abort', () => { synth.cancel(); resolve() }, { once: true })
+
+    const doSpeak = () => {
       const voices = synth.getVoices()
-      const preferred = voices.find((v) => v.lang.startsWith('en') && v.localService) ?? voices.find((v) => v.lang.startsWith('en'))
+      const preferred = voices.find((v) => v.lang.startsWith('en') && v.localService)
+        ?? voices.find((v) => v.lang.startsWith('en'))
+        ?? voices[0]
       if (preferred) utt.voice = preferred
-      utt.onend = () => resolve()
-      utt.onerror = () => resolve()
-      signal.addEventListener('abort', () => { synth.cancel(); resolve() }, { once: true })
       synth.speak(utt)
+      // Chrome bug: speechSynthesis can pause silently — keep it alive
+      const keepAlive = setInterval(() => {
+        if (!synth.speaking) { clearInterval(keepAlive); return }
+        synth.pause()
+        synth.resume()
+      }, 10000)
+      utt.onend = () => { clearInterval(keepAlive); resolve() }
+      utt.onerror = () => { clearInterval(keepAlive); resolve() }
     }
-    if (synth.getVoices().length > 0) {
-      trySpeak()
+
+    const voices = synth.getVoices()
+    if (voices.length > 0) {
+      doSpeak()
     } else {
-      synth.onvoiceschanged = () => trySpeak()
+      synth.addEventListener('voiceschanged', doSpeak, { once: true })
+      // Fallback if voiceschanged never fires (some browsers)
+      setTimeout(() => { if (!synth.speaking) doSpeak() }, 300)
     }
   })
 }
@@ -433,7 +451,7 @@ export default function ChatPage() {
     if (!SR) return
 
     const rec = new SR()
-    rec.lang = 'en-US'
+    rec.lang = navigator.language || 'es-ES'
     rec.continuous = true
     rec.interimResults = true
 
@@ -568,17 +586,9 @@ export default function ChatPage() {
       setTimeout(() => setAudioError(null), 4000)
       return
     }
-    const startVoice = () => { voiceModeRef.current = true; setVoiceMode(true); openMicForVoiceMode() }
-    if (navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(startVoice)
-        .catch((err) => {
-          setAudioError(`Mic permission denied: ${err?.message ?? err}`)
-          setTimeout(() => setAudioError(null), 5000)
-        })
-    } else {
-      startVoice()
-    }
+    voiceModeRef.current = true
+    setVoiceMode(true)
+    openMicForVoiceMode()
   }
 
   function copyMsg(content: string, idx: number) {
