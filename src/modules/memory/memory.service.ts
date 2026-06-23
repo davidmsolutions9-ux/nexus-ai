@@ -172,62 +172,14 @@ async function markObsolete(userId: string, keys: string[]) {
 }
 
 // ─── Generate proactive notifications ────────────────────────────────────────
-
+// Disabled: automatic event/birthday notifications from memory facts are unreliable
+// without a real-time clock. Only explicit reminders (via /reminders API) are used.
 async function generateNotifications(
-  userId: string,
-  facts: ExtractedFact[],
-  relationships: ExtractedRelationship[],
+  _userId: string,
+  _facts: ExtractedFact[],
+  _relationships: ExtractedRelationship[],
 ) {
-  const now = new Date()
-
-  // Check future events (appointments, etc.)
-  for (const fact of facts) {
-    if (!fact.is_future || !fact.date) continue
-    const eventDate = new Date(fact.date)
-    const daysUntil = Math.ceil((eventDate.getTime() - now.getTime()) / 86400000)
-    if (daysUntil < 0 || daysUntil > 14) continue
-
-    const msg = daysUntil === 0
-      ? `Hoy tienes: ${fact.value}`
-      : daysUntil === 1
-        ? `Mañana: ${fact.value}`
-        : `En ${daysUntil} días: ${fact.value}`
-
-    // Avoid creating duplicate notifications for the same event
-    const existing = await prisma.proactiveNotification.findFirst({
-      where: { userId, message: msg, seen: false },
-    }).catch(() => null)
-    if (!existing) {
-      await prisma.proactiveNotification.create({
-        data: { userId, message: msg, type: 'event', scheduledFor: now },
-      }).catch(() => {})
-    }
-  }
-
-  // Check birthdays in relationships
-  for (const rel of relationships) {
-    if (!rel.birthday) continue
-    const birthday = new Date(rel.birthday)
-    const thisYear = new Date(now.getFullYear(), birthday.getMonth(), birthday.getDate())
-    const daysUntil = Math.ceil((thisYear.getTime() - now.getTime()) / 86400000)
-    if (daysUntil < 0 || daysUntil > 14) continue
-
-    const who = `${rel.name} (${rel.type})`
-    const msg = daysUntil === 0
-      ? `¡Hoy es el cumpleaños de ${who}! No olvides felicitarle.`
-      : daysUntil <= 3
-        ? `El cumpleaños de ${who} es en ${daysUntil} días. ¿Has pensado en el regalo?`
-        : `El cumpleaños de ${who} es en ${daysUntil} días.`
-
-    const existingBday = await prisma.proactiveNotification.findFirst({
-      where: { userId, message: msg, seen: false },
-    }).catch(() => null)
-    if (!existingBday) {
-      await prisma.proactiveNotification.create({
-        data: { userId, message: msg, type: 'birthday', scheduledFor: now },
-      }).catch(() => {})
-    }
-  }
+  // no-op
 }
 
 // ─── Build compact memory profile for injection ───────────────────────────────
@@ -298,8 +250,18 @@ export async function buildMemoryProfile(userId: string): Promise<string> {
 // ─── Get and mark notifications as seen ──────────────────────────────────────
 
 export async function getPendingNotifications(userId: string): Promise<string[]> {
+  const now = new Date()
+  const oneDayAgo = new Date(now.getTime() - 86_400_000)
+
+  // Mark all old unseen notifications as seen (clean up stale ones)
+  await prisma.proactiveNotification.updateMany({
+    where: { userId, seen: false, scheduledFor: { lt: oneDayAgo } },
+    data: { seen: true },
+  }).catch(() => {})
+
+  // Only return notifications scheduled within the last 24 hours
   const notifs = await prisma.proactiveNotification.findMany({
-    where: { userId, seen: false },
+    where: { userId, seen: false, scheduledFor: { gte: oneDayAgo } },
     orderBy: { scheduledFor: 'asc' },
     take: 5,
   })
