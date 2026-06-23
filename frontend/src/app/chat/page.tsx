@@ -24,6 +24,7 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
 // ─── Nexus voice ──────────────────────────────────────────────────────────────
 
 let activeAudio: HTMLAudioElement | null = null
+let activeAbort: AbortController | null = null
 let activeSpeechText: string | null = null
 
 function cleanForTTS(text: string): string {
@@ -40,22 +41,48 @@ function cleanForTTS(text: string): string {
     .slice(0, 4000)
 }
 
-async function speakWithTTS(text: string, token: string): Promise<void> {
+function stopCurrentAudio() {
+  activeAbort?.abort()
+  activeAbort = null
+  if (activeAudio) {
+    activeAudio.pause()
+    activeAudio.src = ''
+    activeAudio = null
+  }
+}
+
+async function speakWithTTS(text: string, token: string, signal: AbortSignal): Promise<void> {
   const res = await fetch('/api/proxy/voice/synthesize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ text: cleanForTTS(text) }),
+    signal,
   })
-  if (!res.ok) throw new Error('TTS server failed')
+  if (!res.ok || signal.aborted) return
 
   const blob = await res.blob()
-  const url  = URL.createObjectURL(blob)
+  if (signal.aborted) return
+
+  const url   = URL.createObjectURL(blob)
   const audio = new Audio(url)
   activeAudio = audio
-  audio.play()
+
+  try {
+    await audio.play()
+  } catch {
+    URL.revokeObjectURL(url)
+    return
+  }
+
   return new Promise((resolve) => {
     audio.onended = () => { URL.revokeObjectURL(url); resolve() }
     audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
+    signal.addEventListener('abort', () => {
+      audio.pause()
+      audio.src = ''
+      URL.revokeObjectURL(url)
+      resolve()
+    }, { once: true })
   })
 }
 
@@ -386,20 +413,41 @@ export default function ChatPage() {
   const estimatedCr = input.trim() ? estimateCr(input, history, sliderMode) : null
 
   function startListening() {
+    // Stop mic if already listening
+    if (listening) { setListening(false); return }
+
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) return
-    const rec = new SR()
-    rec.lang = 'es-ES'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.onstart = () => setListening(true)
-    rec.onend   = () => setListening(false)
-    rec.onerror = () => setListening(false)
-    rec.onresult = (e: any) => {
-      const transcript = e.results[0][0].transcript
-      setInput((prev) => prev ? prev + ' ' + transcript : transcript)
+    if (!SR) {
+      alert('Tu navegador no soporta reconocimiento de voz. Prueba Chrome o Safari.')
+      return
     }
-    rec.start()
+
+    // On iOS, request microphone permission explicitly before starting
+    if (navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(() => startRec())
+        .catch(() => alert('Necesitas dar permiso al micrófono en los ajustes del navegador.'))
+    } else {
+      startRec()
+    }
+
+    function startRec() {
+      const rec = new SR()
+      rec.lang = 'es-ES'
+      rec.continuous = false
+      rec.interimResults = false
+      rec.onstart  = () => setListening(true)
+      rec.onend    = () => setListening(false)
+      rec.onerror  = (e: any) => {
+        setListening(false)
+        if (e.error === 'not-allowed') alert('Permiso de micrófono denegado.')
+      }
+      rec.onresult = (e: any) => {
+        const transcript = e.results[0][0].transcript
+        setInput((prev) => prev ? prev + ' ' + transcript : transcript)
+      }
+      try { rec.start() } catch { setListening(false) }
+    }
   }
 
   function copyMsg(content: string, idx: number) {
@@ -410,23 +458,30 @@ export default function ChatPage() {
   }
 
   function speakMsg(content: string, idx: number) {
+    // Stop if already playing this message
     if (speakingIdx === idx) {
-      activeAudio?.pause()
-      activeAudio = null
+      stopCurrentAudio()
       activeSpeechText = null
       setSpeakingIdx(null)
       return
     }
 
-    activeAudio?.pause()
-    activeAudio = null
+    // Stop any other audio first
+    stopCurrentAudio()
 
     if (!token) return
     setSpeakingIdx(idx)
     activeSpeechText = content
 
-    speakWithTTS(content, token)
-      .finally(() => { setSpeakingIdx(null); activeSpeechText = null })
+    const abort = new AbortController()
+    activeAbort = abort
+
+    speakWithTTS(content, token, abort.signal)
+      .finally(() => {
+        if (activeAbort === abort) activeAbort = null
+        setSpeakingIdx((cur) => cur === idx ? null : cur)
+        activeSpeechText = null
+      })
   }
 
   // ── Sidebar ─────────────────────────────────────────────────────────────────
