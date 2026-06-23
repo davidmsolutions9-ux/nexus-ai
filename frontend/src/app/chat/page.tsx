@@ -23,17 +23,9 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
 
 // ─── Nexus voice ──────────────────────────────────────────────────────────────
 
+let currentUtterance: SpeechSynthesisUtterance | null = null
 let activeAbort: AbortController | null = null
 let activeSpeechText: string | null = null
-let activeSource: AudioBufferSourceNode | null = null
-let audioCtx: AudioContext | null = null
-
-function getAudioCtx(): AudioContext {
-  if (!audioCtx || audioCtx.state === 'closed') {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-  }
-  return audioCtx
-}
 
 function cleanForTTS(text: string): string {
   return text
@@ -46,66 +38,48 @@ function cleanForTTS(text: string): string {
     .replace(/^\s*[-*]\s/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-    .slice(0, 4000)
+    .slice(0, 500) // keep short for reliability
 }
 
 function stopCurrentAudio() {
   activeAbort?.abort()
   activeAbort = null
-  if (activeSource) {
-    try { activeSource.stop() } catch { /* already stopped */ }
-    activeSource = null
+  if (currentUtterance) {
+    window.speechSynthesis?.cancel()
+    currentUtterance = null
   }
 }
 
-function speakWithBrowser(text: string, signal: AbortSignal): Promise<void> {
+function speakText(text: string): Promise<void> {
   return new Promise((resolve) => {
+    if (!('speechSynthesis' in window)) { resolve(); return }
     const synth = window.speechSynthesis
     synth.cancel()
-    if (signal.aborted) { resolve(); return }
 
     const utt = new SpeechSynthesisUtterance(cleanForTTS(text))
     utt.lang = 'en-US'
-    utt.rate = 1.0
+    utt.rate = 0.95
     utt.pitch = 1.0
     utt.volume = 1.0
-    utt.onend = () => resolve()
-    utt.onerror = () => resolve()
-    signal.addEventListener('abort', () => { synth.cancel(); resolve() }, { once: true })
+    utt.onend   = () => { currentUtterance = null; resolve() }
+    utt.onerror = (e) => { currentUtterance = null; resolve() }
+    currentUtterance = utt
 
-    const doSpeak = () => {
-      const voices = synth.getVoices()
-      const preferred = voices.find((v) => v.lang.startsWith('en') && v.localService)
-        ?? voices.find((v) => v.lang.startsWith('en'))
-        ?? voices[0]
-      if (preferred) utt.voice = preferred
-      synth.speak(utt)
-      // Chrome bug: speechSynthesis can pause silently — keep it alive
-      const keepAlive = setInterval(() => {
-        if (!synth.speaking) { clearInterval(keepAlive); return }
-        synth.pause()
-        synth.resume()
-      }, 10000)
-      utt.onend = () => { clearInterval(keepAlive); resolve() }
-      utt.onerror = () => { clearInterval(keepAlive); resolve() }
+    // Pick best English voice
+    const pick = () => {
+      const vs = synth.getVoices()
+      const v = vs.find((x) => x.lang === 'en-US' && x.localService)
+        ?? vs.find((x) => x.lang.startsWith('en') && x.localService)
+        ?? vs.find((x) => x.lang.startsWith('en'))
+      if (v) utt.voice = v
     }
-
-    const voices = synth.getVoices()
-    if (voices.length > 0) {
-      doSpeak()
-    } else {
-      synth.addEventListener('voiceschanged', doSpeak, { once: true })
-      // Fallback if voiceschanged never fires (some browsers)
-      setTimeout(() => { if (!synth.speaking) doSpeak() }, 300)
+    pick()
+    synth.speak(utt)
+    // If voices weren't ready, try updating voice (won't restart utterance but sets default)
+    if (synth.getVoices().length === 0) {
+      synth.onvoiceschanged = () => { synth.onvoiceschanged = null; pick() }
     }
   })
-}
-
-async function speakWithTTS(text: string, _token: string, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  if ('speechSynthesis' in window) {
-    return speakWithBrowser(text, signal)
-  }
 }
 
 // ─── Push notification subscription ──────────────────────────────────────────
@@ -452,34 +426,25 @@ export default function ChatPage() {
 
     const rec = new SR()
     rec.lang = navigator.language || 'es-ES'
-    rec.continuous = true
-    rec.interimResults = true
+    rec.continuous = false       // browser stops after a pause → simpler, more reliable
+    rec.interimResults = true    // show text while speaking
 
     let capturedText = ''
-    let hasSpeech = false
-
-    const stopAndSend = () => {
-      clearSilenceTimer()
-      try { rec.stop() } catch { /* ok */ }
-      // onend will fire and handle the send
-    }
 
     rec.onstart = () => {
       setListening(true)
-      // If autoCloseAfter5s and user says nothing, close mic after 5s
+      // If post-response window: close mic after 5s if user says nothing
       if (autoCloseAfter5s) {
         silenceTimerRef.current = setTimeout(() => {
-          if (!hasSpeech) {
-            voiceModeRef.current = false
-            setVoiceMode(false)
-            try { rec.stop() } catch { /* ok */ }
-          }
+          voiceModeRef.current = false
+          setVoiceMode(false)
+          try { rec.stop() } catch { /* ok */ }
         }, 5000)
       }
     }
 
     rec.onresult = (e: any) => {
-      hasSpeech = true
+      // Cancel the auto-close timer — user IS speaking
       clearSilenceTimer()
       let interim = ''
       capturedText = ''
@@ -489,9 +454,6 @@ export default function ChatPage() {
         else interim += t
       }
       setInput((capturedText + interim).trim())
-
-      // Reset 5s silence timer on every new speech result
-      silenceTimerRef.current = setTimeout(() => stopAndSend(), 5000)
     }
 
     rec.onend = () => {
@@ -501,25 +463,31 @@ export default function ChatPage() {
       if (!voiceModeRef.current) return
       const text = capturedText.trim()
       if (text) {
-        capturedText = ''
         setInput('')
         sendMessageFromVoice(text)
+      } else if (!autoCloseAfter5s) {
+        // Nothing said — reopen mic after short pause
+        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 800)
       }
-      // If nothing captured and not autoClose → mic stays closed until next response
     }
 
     rec.onerror = (e: any) => {
       setListening(false)
       clearSilenceTimer()
       if (e.error === 'not-allowed') {
-        setAudioError('Microphone access denied. Check browser permissions.')
-        setTimeout(() => setAudioError(null), 5000)
+        setAudioError('Microphone permission denied. Allow it in browser settings.')
+        setTimeout(() => setAudioError(null), 6000)
         voiceModeRef.current = false
         setVoiceMode(false)
       } else if (e.error === 'no-speech') {
-        // Browser no-speech event — treated as silence, onend will fire
-      } else if (e.error !== 'aborted' && voiceModeRef.current) {
-        setAudioError(`Mic error: ${e.error}`)
+        if (voiceModeRef.current && !autoCloseAfter5s) {
+          voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 500)
+        } else if (autoCloseAfter5s) {
+          voiceModeRef.current = false
+          setVoiceMode(false)
+        }
+      } else if (e.error !== 'aborted') {
+        setAudioError(`Mic: ${e.error}`)
         setTimeout(() => setAudioError(null), 4000)
       }
     }
@@ -552,13 +520,9 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, aiMsg])
         setHistory((prev) => [...prev, { role: 'assistant', content: reply }])
         // Auto-speak reply then reopen mic
-        if (voiceModeRef.current && token) {
-          const abort = new AbortController()
-          activeAbort = abort
-          speakWithTTS(reply, token, abort.signal).finally(() => {
-            if (activeAbort === abort) activeAbort = null
-            setSpeakingIdx(null)
-            // Reopen mic for 5s — auto-closes if user says nothing
+        if (voiceModeRef.current) {
+          speakText(reply).finally(() => {
+            // After speaking, reopen mic for 5s window
             if (voiceModeRef.current) openMicForVoiceMode(true)
           })
         }
@@ -599,32 +563,19 @@ export default function ChatPage() {
   }
 
   function speakMsg(content: string, idx: number) {
-    // Stop if already playing this message
     if (speakingIdx === idx) {
       stopCurrentAudio()
       activeSpeechText = null
       setSpeakingIdx(null)
       return
     }
-
-    // Stop any other audio first
     stopCurrentAudio()
-
-    if (!token) return
     setSpeakingIdx(idx)
     activeSpeechText = content
-
-    const abort = new AbortController()
-    activeAbort = abort
-
     setAudioError(null)
-    speakWithTTS(content, token, abort.signal)
-      .catch((err) => {
-        setAudioError(`Audio error: ${err?.message ?? 'failed'}`)
-        setTimeout(() => setAudioError(null), 4000)
-      })
-      .finally(() => {
-        if (activeAbort === abort) activeAbort = null
+
+    speakText(content)
+      .then(() => {
         setSpeakingIdx((cur) => cur === idx ? null : cur)
         activeSpeechText = null
       })
@@ -758,8 +709,10 @@ export default function ChatPage() {
           title="Mi memoria"
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border border-white/[0.08] bg-white/[0.04] text-gray-400 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-600/10 transition"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.5 2A2.5 2.5 0 0 0 7 4.5v.5A2.5 2.5 0 0 0 4.5 7.5c0 1 .6 1.9 1.5 2.3V12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2.2c.9-.4 1.5-1.3 1.5-2.3A2.5 2.5 0 0 0 17 4.5v-.5A2.5 2.5 0 0 0 14.5 2h-5z"/>
+            <path d="M9 10h.01M12 10h.01M15 10h.01"/>
+            <path d="M8 14v3M12 14v3M16 14v3"/>
           </svg>
           <span>Memory</span>
         </Link>
