@@ -229,9 +229,10 @@ export default function ChatPage() {
   const [showAIMenu, setShowAIMenu]         = useState(false)
   const [notifications, setNotifications]   = useState<string[]>([])
   const [voiceMode, setVoiceMode]           = useState(false)
-  const voiceModeRef = useRef(false)
-  const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const currentRecRef = useRef<any>(null)
+  const voiceModeRef    = useRef(false)
+  const voiceTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentRecRef   = useRef<any>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
 
@@ -422,7 +423,11 @@ export default function ChatPage() {
 
   const estimatedCr = input.trim() ? estimateCr(input, history, sliderMode) : null
 
-  function openMicForVoiceMode() {
+  function clearSilenceTimer() {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+  }
+
+  function openMicForVoiceMode(autoCloseAfter5s = false) {
     if (!voiceModeRef.current) return
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) return
@@ -432,44 +437,73 @@ export default function ChatPage() {
     rec.continuous = true
     rec.interimResults = true
 
-    let finalText = ''
+    let capturedText = ''
+    let hasSpeech = false
 
-    rec.onstart = () => setListening(true)
-    rec.onend   = () => {
-      setListening(false)
-      if (!voiceModeRef.current) return
-      if (finalText.trim()) {
-        const toSend = finalText.trim()
-        finalText = ''
-        setInput('')
-        sendMessageFromVoice(toSend)
-      } else {
-        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 800)
+    const stopAndSend = () => {
+      clearSilenceTimer()
+      try { rec.stop() } catch { /* ok */ }
+      // onend will fire and handle the send
+    }
+
+    rec.onstart = () => {
+      setListening(true)
+      // If autoCloseAfter5s and user says nothing, close mic after 5s
+      if (autoCloseAfter5s) {
+        silenceTimerRef.current = setTimeout(() => {
+          if (!hasSpeech) {
+            voiceModeRef.current = false
+            setVoiceMode(false)
+            try { rec.stop() } catch { /* ok */ }
+          }
+        }, 5000)
       }
     }
+
+    rec.onresult = (e: any) => {
+      hasSpeech = true
+      clearSilenceTimer()
+      let interim = ''
+      capturedText = ''
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        if (e.results[i].isFinal) capturedText += t + ' '
+        else interim += t
+      }
+      setInput((capturedText + interim).trim())
+
+      // Reset 5s silence timer on every new speech result
+      silenceTimerRef.current = setTimeout(() => stopAndSend(), 5000)
+    }
+
+    rec.onend = () => {
+      setListening(false)
+      clearSilenceTimer()
+      currentRecRef.current = null
+      if (!voiceModeRef.current) return
+      const text = capturedText.trim()
+      if (text) {
+        capturedText = ''
+        setInput('')
+        sendMessageFromVoice(text)
+      }
+      // If nothing captured and not autoClose → mic stays closed until next response
+    }
+
     rec.onerror = (e: any) => {
       setListening(false)
-      if (e.error === 'no-speech' && voiceModeRef.current) {
-        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 500)
-      } else if (e.error === 'not-allowed') {
+      clearSilenceTimer()
+      if (e.error === 'not-allowed') {
         setAudioError('Microphone access denied. Check browser permissions.')
         setTimeout(() => setAudioError(null), 5000)
         voiceModeRef.current = false
         setVoiceMode(false)
+      } else if (e.error === 'no-speech') {
+        // Browser no-speech event — treated as silence, onend will fire
       } else if (e.error !== 'aborted' && voiceModeRef.current) {
         setAudioError(`Mic error: ${e.error}`)
         setTimeout(() => setAudioError(null), 4000)
       }
-    }
-    rec.onresult = (e: any) => {
-      let interim = ''
-      finalText = ''
-      for (let i = 0; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript
-        if (e.results[i].isFinal) finalText += t + ' '
-        else interim += t
-      }
-      setInput((finalText + interim).trim())
     }
 
     if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
@@ -506,8 +540,8 @@ export default function ChatPage() {
           speakWithTTS(reply, token, abort.signal).finally(() => {
             if (activeAbort === abort) activeAbort = null
             setSpeakingIdx(null)
-            // Reopen mic for 5 seconds
-            if (voiceModeRef.current) openMicForVoiceMode()
+            // Reopen mic for 5s — auto-closes if user says nothing
+            if (voiceModeRef.current) openMicForVoiceMode(true)
           })
         }
       })
@@ -523,6 +557,7 @@ export default function ChatPage() {
       setVoiceMode(false)
       setListening(false)
       if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+      clearSilenceTimer()
       if (currentRecRef.current) { try { currentRecRef.current.stop() } catch { /* ok */ }; currentRecRef.current = null }
       stopCurrentAudio()
       return
