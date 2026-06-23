@@ -466,7 +466,7 @@ export default function ChatPage() {
             value={convSearch}
             onChange={(e) => setConvSearch(e.target.value)}
             placeholder="Buscar chats…"
-            className="flex-1 bg-transparent text-xs text-white placeholder-gray-600 outline-none"
+            className="flex-1 bg-transparent text-xs outline-none" style={{color:'var(--nx-text)'}}
           />
           {convSearch && (
             <button onClick={() => setConvSearch('')} className="text-gray-600 hover:text-gray-400">
@@ -593,7 +593,7 @@ export default function ChatPage() {
     <div className="flex h-screen overflow-hidden nx-bg nx-text" data-theme={darkMode ? 'dark' : 'light'} style={{background:'var(--nx-bg)',color:'var(--nx-text)'}}>
 
       {/* Desktop sidebar */}
-      <aside className={`hidden md:flex flex-col shrink-0 border-r transition-all duration-200 ${sidebarOpen ? 'w-60' : 'w-0 overflow-hidden border-0'}`} style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}}>
+      <aside className={`hidden md:flex flex-col shrink-0 border-r transition-all duration-200 ${sidebarOpen ? 'w-60' : 'w-0 overflow-hidden border-0'}`} style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)',color:'var(--nx-text)'}}>
         <SidebarContent />
       </aside>
 
@@ -601,7 +601,7 @@ export default function ChatPage() {
       {drawerOpen && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setDrawerOpen(false)}>
           <div className="absolute inset-0 bg-black/60" />
-          <div className="absolute left-0 top-0 h-full w-64 border-r z-50" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}} onClick={(e) => e.stopPropagation()}>
+          <div className="absolute left-0 top-0 h-full w-64 border-r z-50" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)',color:'var(--nx-text)'}} onClick={(e) => e.stopPropagation()}>
             <SidebarContent />
           </div>
         </div>
@@ -611,7 +611,7 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Header */}
-        <header className="flex items-center gap-2 px-3 py-2.5 border-b shrink-0" style={{background:'var(--nx-header)',borderColor:'var(--nx-border)'}}>
+        <header className="flex items-center gap-2 px-3 py-2.5 border-b shrink-0" style={{background:'var(--nx-header)',borderColor:'var(--nx-border)',color:'var(--nx-text)'}}>
           <button
             onClick={() => { setSidebarOpen((v) => !v); setDrawerOpen((v) => !v) }}
             className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition shrink-0"
@@ -687,7 +687,7 @@ export default function ChatPage() {
               {email ? email[0].toUpperCase() : '?'}
             </button>
             {showProfile && (
-              <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl shadow-2xl border z-30 overflow-hidden" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)'}}>
+              <div className="absolute top-full right-0 mt-2 w-64 rounded-2xl shadow-2xl border z-30 overflow-hidden" style={{background:'var(--nx-sidebar)',borderColor:'var(--nx-border)',color:'var(--nx-text)'}}>
                 {/* User info */}
                 <div className="px-4 py-3 border-b" style={{borderColor:'var(--nx-border)'}}>
                   <div className="flex items-center gap-3">
@@ -877,8 +877,8 @@ export default function ChatPage() {
                 placeholder="Escribe un mensaje..."
                 disabled={loading}
                 rows={1}
-                className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 resize-none focus:outline-none leading-relaxed disabled:opacity-50"
-                style={{ maxHeight: '120px', overflowY: 'auto' }}
+                className="flex-1 bg-transparent text-sm resize-none focus:outline-none leading-relaxed disabled:opacity-50"
+                style={{ maxHeight: '120px', overflowY: 'auto', color: 'var(--nx-text)' }}
               />
               {/* Microphone */}
               <button

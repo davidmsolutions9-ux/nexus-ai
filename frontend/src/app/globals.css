@@ -52,6 +52,48 @@ body {
 [data-theme] .nx-text-sub { color: var(--nx-text-sub) !important; }
 [data-theme] .nx-header   { background-color: var(--nx-header) !important; }
 
+/* Inputs inherit theme text color */
+[data-theme] input,
+[data-theme] textarea {
+  color: var(--nx-text);
+}
+[data-theme] input::placeholder,
+[data-theme] textarea::placeholder {
+  color: var(--nx-text-sub);
+}
+
+/* Light mode: override hardcoded white text on non-colored backgrounds */
+[data-theme="light"] .text-white  { color: #111827 !important; }
+[data-theme="light"] .text-white\/90 { color: rgba(17,24,39,0.9) !important; }
+[data-theme="light"] .text-white\/80 { color: rgba(17,24,39,0.8) !important; }
+[data-theme="light"] .text-white\/70 { color: rgba(17,24,39,0.7) !important; }
+[data-theme="light"] .text-gray-100 { color: #1f2937 !important; }
+[data-theme="light"] .text-gray-300 { color: #374151 !important; }
+[data-theme="light"] .text-gray-400 { color: #4b5563 !important; }
+[data-theme="light"] .text-gray-500 { color: #374151 !important; }
+[data-theme="light"] .text-gray-600 { color: #1f2937 !important; }
+/* Restore white text inside blue/colored backgrounds */
+[data-theme="light"] .bg-\[\#1A56DB\]       .text-white,
+[data-theme="light"] .bg-blue-600           .text-white,
+[data-theme="light"] .bg-blue-500           .text-white,
+[data-theme="light"] .bg-red-500\/20        .text-red-400,
+[data-theme="light"] [style*="background: linear-gradient"] .text-white,
+[data-theme="light"] [style*="background:linear-gradient"]  .text-white { color: #ffffff !important; }
+/* SVG stroke/fill inside light mode: use currentColor which inherits */
+[data-theme="light"] svg path { color: inherit; }
+
+/* Light mode: semi-transparent white overlays become light gray */
+[data-theme="light"] .bg-white\/\[0\.04\],
+[data-theme="light"] .bg-white\/\[0\.06\],
+[data-theme="light"] .bg-white\/\[0\.08\] { background-color: rgba(0,0,0,0.04) !important; }
+[data-theme="light"] .hover\:bg-white\/5:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.04\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.06\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.08\]:hover { background-color: rgba(0,0,0,0.06) !important; }
+[data-theme="light"] .border-white\/\[0\.06\],
+[data-theme="light"] .border-white\/\[0\.08\] { border-color: rgba(0,0,0,0.1) !important; }
+[data-theme="light"] .hover\:border-white\/10:hover { border-color: rgba(0,0,0,0.15) !important; }
+
 .bg-gradient-radial {
   background: radial-gradient(ellipse at center, var(--tw-gradient-stops));
 }
