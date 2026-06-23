@@ -83,7 +83,7 @@ export async function voiceRoutes(app: FastifyInstance) {
     const client = new OpenAI({ apiKey: openaiKey })
     const response = await client.audio.speech.create({
       model: 'tts-1-hd',
-      voice: 'shimmer',
+      voice: 'nova',
       input: clean,
       speed: 1.0,
     })

@@ -1,4 +1,4 @@
-const CACHE = 'nexus-v2'
+const CACHE = 'nexus-v3'
 const OFFLINE_URL = '/offline'
 
 // Cache app shell on install
