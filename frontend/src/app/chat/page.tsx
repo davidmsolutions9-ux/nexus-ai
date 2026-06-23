@@ -83,60 +83,9 @@ function speakWithBrowser(text: string, signal: AbortSignal): Promise<void> {
   })
 }
 
-async function speakWithTTS(text: string, token: string, signal: AbortSignal): Promise<void> {
-  // Try server TTS first
-  try {
-    const ctx = getAudioCtx()
-    await ctx.resume()
-    if (signal.aborted) return
-
-    const res = await fetch('/api/proxy/voice/synthesize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text: cleanForTTS(text) }),
-      signal,
-    })
-    if (signal.aborted) return
-
-    if (res.ok) {
-      const arrayBuffer = await res.arrayBuffer()
-      if (signal.aborted) return
-      try {
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
-        if (signal.aborted) return
-        const source = ctx.createBufferSource()
-        source.buffer = audioBuffer
-        source.connect(ctx.destination)
-        activeSource = source
-        return new Promise((resolve) => {
-          source.onended = () => { if (activeSource === source) activeSource = null; resolve() }
-          signal.addEventListener('abort', () => {
-            try { source.stop() } catch { /* ok */ }
-            if (activeSource === source) activeSource = null
-            resolve()
-          }, { once: true })
-          source.start()
-        })
-      } catch {
-        // AudioContext decode failed — try HTMLAudioElement
-        const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' })
-        const url = URL.createObjectURL(blob)
-        const audio = new Audio(url)
-        return new Promise((resolve) => {
-          audio.onended = () => { URL.revokeObjectURL(url); resolve() }
-          audio.onerror = () => { URL.revokeObjectURL(url); resolve() }
-          signal.addEventListener('abort', () => { audio.pause(); URL.revokeObjectURL(url); resolve() }, { once: true })
-          audio.play().catch(() => { URL.revokeObjectURL(url); resolve() })
-        })
-      }
-    }
-  } catch (err: any) {
-    if (err?.name === 'AbortError') return
-    // Server TTS failed — fall through to browser TTS
-  }
-
-  // Browser-native TTS fallback (no API key needed, works everywhere)
-  if (!signal.aborted && 'speechSynthesis' in window) {
+async function speakWithTTS(text: string, _token: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  if ('speechSynthesis' in window) {
     return speakWithBrowser(text, signal)
   }
 }
@@ -282,6 +231,7 @@ export default function ChatPage() {
   const [voiceMode, setVoiceMode]           = useState(false)
   const voiceModeRef = useRef(false)
   const voiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentRecRef = useRef<any>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
 
@@ -377,6 +327,11 @@ export default function ChatPage() {
   async function sendMessage(e?: React.FormEvent) {
     e?.preventDefault()
     if (!input.trim() || loading) return
+    // Stop mic during send (voice mode: will reopen after response)
+    if (currentRecRef.current) {
+      try { currentRecRef.current.stop() } catch { /* ok */ }
+      currentRecRef.current = null
+    }
 
     const text = input.trim()
     const mode = sliderMode
@@ -474,21 +429,22 @@ export default function ChatPage() {
 
     const rec = new SR()
     rec.lang = 'en-US'
-    rec.continuous = false
-    rec.interimResults = false
+    rec.continuous = true
+    rec.interimResults = true
 
-    let accumulated = ''
+    let finalText = ''
 
     rec.onstart = () => setListening(true)
     rec.onend   = () => {
       setListening(false)
       if (!voiceModeRef.current) return
-      if (accumulated.trim()) {
-        sendMessageFromVoice(accumulated.trim())
-        accumulated = ''
+      if (finalText.trim()) {
+        const toSend = finalText.trim()
+        finalText = ''
+        setInput('')
+        sendMessageFromVoice(toSend)
       } else {
-        // Nothing spoken — reopen mic after short pause
-        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 1000)
+        voiceTimerRef.current = setTimeout(() => openMicForVoiceMode(), 800)
       }
     }
     rec.onerror = (e: any) => {
@@ -506,11 +462,18 @@ export default function ChatPage() {
       }
     }
     rec.onresult = (e: any) => {
-      accumulated = Array.from(e.results).map((r: any) => r[0].transcript).join(' ')
-      setInput(accumulated)
+      let interim = ''
+      finalText = ''
+      for (let i = 0; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript
+        if (e.results[i].isFinal) finalText += t + ' '
+        else interim += t
+      }
+      setInput((finalText + interim).trim())
     }
 
     if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+    currentRecRef.current = rec
     try { rec.start() } catch { setListening(false) }
   }
 
@@ -560,6 +523,7 @@ export default function ChatPage() {
       setVoiceMode(false)
       setListening(false)
       if (voiceTimerRef.current) clearTimeout(voiceTimerRef.current)
+      if (currentRecRef.current) { try { currentRecRef.current.stop() } catch { /* ok */ }; currentRecRef.current = null }
       stopCurrentAudio()
       return
     }
