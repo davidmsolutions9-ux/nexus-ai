@@ -23,6 +23,7 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
 // ─── Nexus voice ──────────────────────────────────────────────────────────────
 
 let currentUtterance: SpeechSynthesisUtterance | null = null
+let ttsKeepAlive: ReturnType<typeof setInterval> | null = null
 
 function cleanForTTS(text: string): string {
   return text
@@ -38,11 +39,27 @@ function cleanForTTS(text: string): string {
     .slice(0, 1500)
 }
 
+function clearTtsKeepAlive() {
+  if (ttsKeepAlive) { clearInterval(ttsKeepAlive); ttsKeepAlive = null }
+}
+
 function stopCurrentAudio() {
-  if (currentUtterance) {
+  clearTtsKeepAlive()
+  if (currentUtterance || window.speechSynthesis?.speaking) {
     window.speechSynthesis?.cancel()
     currentUtterance = null
   }
+}
+
+// Unlock Chrome's audio context — must be called from a user gesture (button click)
+function unlockAudio() {
+  if (!('speechSynthesis' in window)) return
+  try {
+    const utt = new SpeechSynthesisUtterance(' ')
+    utt.volume = 0
+    window.speechSynthesis.speak(utt)
+    window.speechSynthesis.cancel()
+  } catch { /* ok */ }
 }
 
 // Pre-warm voices on first call so subsequent calls are instant
@@ -66,6 +83,7 @@ function speakText(text: string): Promise<void> {
   return new Promise((resolve) => {
     if (!('speechSynthesis' in window)) { resolve(); return }
     const synth = window.speechSynthesis
+    clearTtsKeepAlive()
     synth.cancel()
     currentUtterance = null
 
@@ -85,10 +103,25 @@ function speakText(text: string): Promise<void> {
         ?? voices[0]
       if (v) utt.voice = v
 
-      utt.onend   = () => { currentUtterance = null; resolve() }
-      utt.onerror = () => { currentUtterance = null; resolve() }
+      utt.onend = () => {
+        clearTtsKeepAlive()
+        currentUtterance = null
+        resolve()
+      }
+      utt.onerror = () => {
+        clearTtsKeepAlive()
+        currentUtterance = null
+        resolve()
+      }
       currentUtterance = utt
       synth.speak(utt)
+
+      // Chrome pauses speechSynthesis after ~15s — keep it alive with pause/resume
+      ttsKeepAlive = setInterval(() => {
+        if (!synth.speaking) { clearTtsKeepAlive(); return }
+        synth.pause()
+        synth.resume()
+      }, 10000)
     }
 
     const existing = synth.getVoices()
@@ -591,6 +624,7 @@ export default function ChatPage() {
       setTimeout(() => setAudioError(null), 4000)
       return
     }
+    unlockAudio() // unlock Chrome audio context within user gesture
     voiceModeRef.current = true
     setVoiceMode(true)
     openMicForVoiceMode()
@@ -609,6 +643,7 @@ export default function ChatPage() {
       setSpeakingIdx(null)
       return
     }
+    unlockAudio() // unlock Chrome audio context within user gesture
     stopCurrentAudio()
     setSpeakingIdx(idx)
     setAudioError(null)
