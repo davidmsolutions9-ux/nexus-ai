@@ -45,7 +45,7 @@ export default function RegisterPage() {
   const selected = PLANS.find((p) => p.id === plan)!
 
   return (
-    <main className="min-h-screen bg-[#0a0f1a] flex items-center justify-center px-4 py-12">
+    <main className="min-h-screen flex items-center justify-center px-4 py-12" style={{background:'var(--nx-bg)',color:'var(--nx-text)'}} data-theme="dark">
       <div className="w-full max-w-lg">
 
         {/* Logo */}
@@ -165,26 +165,11 @@ function EyeOff() {
 }
 
 function XLogo({ size = 24 }: { size?: number }) {
+  const pad = Math.round(size * 0.08)
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
-      <defs>
-        <linearGradient id="rbL" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#a0a8c0" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#d8ddf0" /><stop offset="100%" stopColor="#707898" />
-        </linearGradient>
-        <linearGradient id="rbR" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#a0a8c0" /><stop offset="35%" stopColor="#ffffff" /><stop offset="65%" stopColor="#d8ddf0" /><stop offset="100%" stopColor="#707898" />
-        </linearGradient>
-        <linearGradient id="rgem" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#90d0ff" /><stop offset="40%" stopColor="#1a70ff" /><stop offset="100%" stopColor="#0030b0" />
-        </linearGradient>
-      </defs>
-      <polygon points="4,1 50,45 50,55 1,4"   fill="url(#rbL)" />
-      <polygon points="96,99 50,55 50,45 99,96" fill="url(#rbL)" />
-      <polygon points="96,1 55,50 45,50 99,4"  fill="url(#rbR)" />
-      <polygon points="4,99 45,50 55,50 1,96"  fill="url(#rbR)" />
-      <polygon points="50,33 67,50 50,67 33,50" fill="url(#rgem)" />
-      <polygon points="50,39 61,50 50,61 39,50" fill="#60b8ff" opacity="0.55" />
-      <polygon points="50,43 57,50 50,57 43,50" fill="white" opacity="0.30" />
-    </svg>
+    <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:size, height:size, borderRadius:Math.round(size*0.22), background:'#06101f', flexShrink:0, overflow:'hidden', padding:pad }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-nexus.png" alt="Nexus" width={size-pad*2} height={size-pad*2} style={{display:'block',objectFit:'contain'}} />
+    </span>
   )
 }

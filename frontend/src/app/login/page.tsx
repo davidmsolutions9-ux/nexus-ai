@@ -30,7 +30,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0a0f1a] flex items-center justify-center px-4">
+    <main className="min-h-screen flex items-center justify-center px-4" style={{background:'var(--nx-bg)',color:'var(--nx-text)'}} data-theme="dark">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center justify-center gap-2.5 mb-3">
