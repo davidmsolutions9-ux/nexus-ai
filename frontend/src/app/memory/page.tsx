@@ -44,6 +44,12 @@ export default function MemoryPage() {
   const [relationships, setRelationships] = useState<Relationship[]>([])
   const [loading, setLoading]             = useState(true)
   const [deletingId, setDeletingId]       = useState<string | null>(null)
+  const [darkMode, setDarkMode]           = useState(true)
+
+  useEffect(() => {
+    const saved = localStorage.getItem('nexus_theme')
+    if (saved === 'light') setDarkMode(false)
+  }, [])
 
   useEffect(() => {
     if (!_hasHydrated) return
@@ -83,7 +89,7 @@ export default function MemoryPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{background:'var(--nx-bg)',color:'var(--nx-text)'}}>
+    <div className="min-h-screen" data-theme={darkMode ? 'dark' : 'light'} style={{background:'var(--nx-bg)',color:'var(--nx-text)'}}>
       <div className="max-w-2xl mx-auto px-4 py-8">
 
         {/* Header */}
@@ -133,10 +139,10 @@ export default function MemoryPage() {
               </h2>
               <div className="flex flex-col gap-2">
                 {catFacts.map((f) => (
-                  <div key={f.id} className="flex items-start gap-3 px-4 py-3 bg-[#1d2535] rounded-xl border border-white/[0.06] group">
+                  <div key={f.id} className="flex items-start gap-3 px-4 py-3 rounded-xl border group" style={{background:'var(--nx-bubble-ai)',borderColor:'var(--nx-border)'}}>
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs text-gray-500 mb-0.5">{f.key.replace(/_/g, ' ')}</div>
-                      <div className="text-sm text-gray-100">{f.value}</div>
+                      <div className="text-xs mb-0.5" style={{color:'var(--nx-text-sub)'}}>{f.key.replace(/_/g, ' ')}</div>
+                      <div className="text-sm" style={{color:'var(--nx-text)'}}>{f.value}</div>
                       {f.factDate && (
                         <div className="text-[10px] text-gray-600 mt-0.5">
                           {f.isFuture ? '📅 ' : ''}
@@ -147,7 +153,7 @@ export default function MemoryPage() {
                     <button
                       onClick={() => deleteFact(f.id)}
                       disabled={deletingId === f.id}
-                      className="opacity-0 group-hover:opacity-100 shrink-0 text-gray-600 hover:text-red-400 transition disabled:opacity-30"
+                      className="shrink-0 text-gray-500 hover:text-red-400 transition disabled:opacity-30 p-1 rounded-lg hover:bg-red-500/10"
                       title="Eliminar este dato"
                     >
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -169,13 +175,13 @@ export default function MemoryPage() {
             </h2>
             <div className="flex flex-col gap-2">
               {relationships.map((r) => (
-                <div key={r.id} className="flex items-start gap-3 px-4 py-3 bg-[#1d2535] rounded-xl border border-white/[0.06] group">
+                <div key={r.id} className="flex items-start gap-3 px-4 py-3 rounded-xl border group" style={{background:'var(--nx-bubble-ai)',borderColor:'var(--nx-border)'}}>
                   <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0 text-sm">
                     {r.name[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-gray-100 font-medium">{r.name}</div>
-                    <div className="text-xs text-gray-500">{r.relationshipType}</div>
+                    <div className="text-sm font-medium" style={{color:'var(--nx-text)'}}>{r.name}</div>
+                    <div className="text-xs" style={{color:'var(--nx-text-sub)'}}>{r.relationshipType}</div>
                     {r.birthday && (
                       <div className="text-[10px] text-gray-600 mt-0.5">
                         🎂 {new Date(r.birthday).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })}
@@ -186,7 +192,7 @@ export default function MemoryPage() {
                   <button
                     onClick={() => deleteRelationship(r.id)}
                     disabled={deletingId === r.id}
-                    className="opacity-0 group-hover:opacity-100 shrink-0 text-gray-600 hover:text-red-400 transition disabled:opacity-30"
+                    className="shrink-0 text-gray-500 hover:text-red-400 transition disabled:opacity-30 p-1 rounded-lg hover:bg-red-500/10"
                     title="Eliminar esta persona"
                   >
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

@@ -24,6 +24,8 @@ function estimateCr(inputText: string, hist: { content: string }[], mode: Slider
 
 let currentUtterance: SpeechSynthesisUtterance | null = null
 let ttsKeepAlive: ReturnType<typeof setInterval> | null = null
+// Shared TTS language preference — updated by component, read by speakText
+let ttsPrefLang: string = (typeof localStorage !== 'undefined' ? localStorage.getItem('nexus_tts_lang') : null) || 'en'
 
 function cleanForTTS(text: string): string {
   return text
@@ -92,16 +94,16 @@ function speakText(text: string): Promise<void> {
 
     const doSpeak = (voices: SpeechSynthesisVoice[]) => {
       const utt = new SpeechSynthesisUtterance(cleaned)
-      // Use browser/system language so Spanish text sounds natural in Spanish
-      const sysLang = (typeof navigator !== 'undefined' ? navigator.language : null) || 'es-ES'
-      utt.lang = sysLang
+      // ttsPrefLang: 'en' → en-US (default for demo), 'es' → es-ES
+      const targetLang = ttsPrefLang === 'es' ? 'es-ES' : 'en-US'
+      utt.lang = targetLang
       utt.rate = 0.95
       utt.pitch = 1.0
       utt.volume = 1.0
 
-      // Pick best voice: prefer local service voice matching system language
-      const langBase = sysLang.split('-')[0]
-      const v = voices.find((x) => x.lang === sysLang && x.localService)
+      // Pick best voice matching target language, preferring local (higher quality)
+      const langBase = targetLang.split('-')[0]
+      const v = voices.find((x) => x.lang === targetLang && x.localService)
         ?? voices.find((x) => x.lang.startsWith(langBase) && x.localService)
         ?? voices.find((x) => x.lang.startsWith(langBase))
         ?? voices.find((x) => x.localService)
@@ -266,10 +268,18 @@ export default function ChatPage() {
   const [topUpMsg, setTopUpMsg]         = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [notifEnabled, setNotifEnabled] = useState(false)
+  const [creditsMsg, setCreditsMsg]     = useState(false)
+  const [ttsLang, setTtsLang]           = useState<'en' | 'es'>(() => {
+    if (typeof localStorage !== 'undefined') return (localStorage.getItem('nexus_tts_lang') as 'en' | 'es') || 'en'
+    return 'en'
+  })
 
   useEffect(() => {
     const saved = localStorage.getItem('nexus_theme')
     if (saved === 'light') setDarkMode(false)
+    const savedLang = localStorage.getItem('nexus_tts_lang') as 'en' | 'es' | null
+    if (savedLang) { setTtsLang(savedLang); ttsPrefLang = savedLang }
+    else { ttsPrefLang = 'en' } // default English for demo
     // Pre-warm speech synthesis voices so first speak is instant
     if ('speechSynthesis' in window) ensureVoices()
   }, [])
@@ -796,15 +806,24 @@ export default function ChatPage() {
               </button>
             </div>
 
-            {/* Language */}
+            {/* Language / Voice */}
             <div className="flex items-center justify-between px-2 py-2 rounded-xl text-xs text-gray-500">
               <div className="flex items-center gap-2.5">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                 </svg>
-                <span>Language</span>
+                <span>Voice language</span>
               </div>
-              <span className="text-[10px] text-gray-600 uppercase tracking-wide">{typeof navigator !== 'undefined' ? (navigator.language || 'auto') : 'auto'}</span>
+              <div className="flex items-center gap-1 bg-white/[0.06] rounded-lg p-0.5">
+                <button
+                  onClick={() => { setTtsLang('en'); ttsPrefLang = 'en'; localStorage.setItem('nexus_tts_lang', 'en') }}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition ${ttsLang === 'en' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                >EN</button>
+                <button
+                  onClick={() => { setTtsLang('es'); ttsPrefLang = 'es'; localStorage.setItem('nexus_tts_lang', 'es') }}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition ${ttsLang === 'es' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                >ES</button>
+              </div>
             </div>
 
             {/* Notifications */}
@@ -865,10 +884,10 @@ export default function ChatPage() {
           <span>Memory</span>
         </Link>
 
-        {/* Top up */}
+        {/* +Credits */}
         <div className="relative">
           {topUpMsg && (
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap text-[10px] text-gray-300 bg-[#1a2030] border border-white/[0.08] px-2 py-1 rounded-lg shadow-lg pointer-events-none z-10">
+            <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap text-[10px] px-2 py-1 rounded-lg shadow-lg pointer-events-none z-10 border ${darkMode ? 'text-gray-300 bg-[#1a2030] border-white/[0.08]' : 'text-gray-700 bg-white border-black/[0.1]'}`}>
               Reload not available
             </div>
           )}
@@ -880,7 +899,7 @@ export default function ChatPage() {
               <circle cx="12" cy="12" r="9"/>
               <path d="M12 7v10M9.5 9.5C9.5 8.4 10.6 8 12 8s2.5.4 2.5 1.5-1 1.5-2.5 1.5-2.5.6-2.5 1.5S10.6 14 12 14s2.5-.4 2.5-1.5"/>
             </svg>
-            <span>Top up</span>
+            <span>+Credits</span>
           </button>
         </div>
       </div>
@@ -987,15 +1006,35 @@ export default function ChatPage() {
 
           <div className="flex-1" />
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600/10 border border-blue-500/20 rounded-xl shrink-0">
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-              <circle cx="6" cy="6" r="5" stroke="#3b82f6" strokeWidth="1.3" />
-              <path d="M4 6h4M6 4v4" stroke="#3b82f6" strokeWidth="1.2" strokeLinecap="round" />
-            </svg>
-            <span className="text-xs font-semibold text-blue-300">
-              {balance !== null ? `${balance.toFixed(0)} cr` : '—'}
-            </span>
+          {/* +Credits button */}
+          <div className="relative shrink-0">
+            {creditsMsg && (
+              <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap text-[10px] px-2 py-1 rounded-lg shadow-lg pointer-events-none z-10 border ${darkMode ? 'text-gray-300 bg-[#1a2030] border-white/[0.08]' : 'text-gray-700 bg-white border-black/[0.1]'}`}>
+                Reload not available
+              </div>
+            )}
+            <button
+              onClick={() => { setCreditsMsg(true); setTimeout(() => setCreditsMsg(false), 2000) }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600/10 border border-blue-500/20 rounded-xl text-xs font-semibold text-blue-300 hover:bg-blue-600/20 transition"
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="5" stroke="#3b82f6" strokeWidth="1.3" />
+                <path d="M4 6h4M6 4v4" stroke="#3b82f6" strokeWidth="1.2" strokeLinecap="round" />
+              </svg>
+              <span>{balance !== null ? `+${balance.toFixed(0)} cr` : '+ — cr'}</span>
+            </button>
           </div>
+
+          {/* Upgrade plan */}
+          <button
+            onClick={() => setShowProfile(true)}
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition border ${darkMode ? 'border-purple-500/30 bg-purple-600/10 text-purple-300 hover:bg-purple-600/20' : 'border-purple-400/40 bg-purple-50 text-purple-600 hover:bg-purple-100'}`}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            Upgrade
+          </button>
 
           {/* Profile button */}
           <div className="relative shrink-0">
@@ -1271,7 +1310,7 @@ export default function ChatPage() {
 
             <div className="flex items-center justify-between px-0.5">
               {/* Slider mode */}
-              <div className="flex items-center gap-0.5 bg-[#0d1420] border border-white/[0.06] rounded-xl p-1">
+              <div className="flex items-center gap-0.5 rounded-xl p-1 border" style={{background:'var(--nx-bubble-ai)',borderColor:'var(--nx-border)'}}>
                 {(['ECONOMIC', 'AUTO', 'PRO'] as SliderMode[]).map((mode) => {
                   const cfg = SLIDER_CONFIG[mode]
                   return (
