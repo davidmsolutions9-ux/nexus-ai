@@ -772,17 +772,22 @@ export default function ChatPage() {
           <span>{darkMode ? 'Light' : 'Dark'}</span>
         </button>
 
-        {/* Memory — brain icon */}
+        {/* Memory — brain icon (Lucide Brain) */}
         <Link
           href="/memory"
           title="Memory"
           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border border-white/[0.08] bg-white/[0.04] text-gray-400 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-600/10 transition"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5a7 7 0 0 0-7 7c0 1.9.76 3.62 2 4.9V19a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2.1A7 7 0 0 0 12 5z"/>
-            <path d="M9 19v1M12 19v1M15 19v1"/>
-            <path d="M9 9c0-1.1.9-2 2-2"/>
-            <path d="M15 12h.01M12 12h.01M9 12h.01"/>
+            <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+            <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+            <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+            <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
+            <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+            <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+            <path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
+            <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+            <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
           </svg>
           <span>Memory</span>
         </Link>
@@ -938,7 +943,7 @@ export default function ChatPage() {
                     onClick={() => { setShowProfile(false); window.location.href = '/memory' }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-gray-400 hover:text-white hover:bg-white/[0.06] transition text-left"
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5a7 7 0 0 0-7 7c0 1.9.76 3.62 2 4.9V19a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2.1A7 7 0 0 0 12 5z"/><path d="M9 19v1M12 19v1M15 19v1"/><path d="M9 9c0-1.1.9-2 2-2"/><path d="M15 12h.01M12 12h.01M9 12h.01"/></svg>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>
                     My memory
                   </button>
                   <div className="px-3 py-2 rounded-xl border border-white/[0.06] opacity-50 cursor-not-allowed">
