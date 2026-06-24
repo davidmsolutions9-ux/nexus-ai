@@ -92,14 +92,19 @@ function speakText(text: string): Promise<void> {
 
     const doSpeak = (voices: SpeechSynthesisVoice[]) => {
       const utt = new SpeechSynthesisUtterance(cleaned)
-      utt.lang = 'en-US'
+      // Use browser/system language so Spanish text sounds natural in Spanish
+      const sysLang = (typeof navigator !== 'undefined' ? navigator.language : null) || 'es-ES'
+      utt.lang = sysLang
       utt.rate = 0.95
       utt.pitch = 1.0
       utt.volume = 1.0
 
-      const v = voices.find((x) => x.lang === 'en-US' && x.localService)
-        ?? voices.find((x) => x.lang.startsWith('en') && x.localService)
-        ?? voices.find((x) => x.lang.startsWith('en'))
+      // Pick best voice: prefer local service voice matching system language
+      const langBase = sysLang.split('-')[0]
+      const v = voices.find((x) => x.lang === sysLang && x.localService)
+        ?? voices.find((x) => x.lang.startsWith(langBase) && x.localService)
+        ?? voices.find((x) => x.lang.startsWith(langBase))
+        ?? voices.find((x) => x.localService)
         ?? voices[0]
       if (v) utt.voice = v
 
